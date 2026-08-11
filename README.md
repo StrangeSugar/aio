@@ -333,5 +333,16 @@ We welcome contributions of all kinds — bug reports, feature suggestions, docu
   </tr>
 </table>
 
+---
+
+## Star History
+
+<p align="center">
+  <a href="https://www.star-history.com/#Tencent/TencentDB-Agent-Memory&Date">
+    <img src="https://github.com/user-attachments/assets/16753a90-8bc9-471b-819e-311947ed94f7" alt="Star History Chart" width="600" />
+  </a>
+</p>
+
+---
 
 [MIT](./LICENSE) © TencentDB Agent Memory Team
