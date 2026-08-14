@@ -262,6 +262,7 @@ PersonaMem 检验Agent 能否在长期交互后正确理解和运用用户信息
 
 ## 相关文档
 
+- [路线图](./ROADMAP_CN.md)（接下来要做什么）
 - [完整安装指南](./INSTALL_CN.md)（Memory Core + Hub + Proxy 一键部署）
 - [Roadmap](./ROADMAP_CN.md)（我们接下来在做什么；English: [ROADMAP.md](./ROADMAP.md)）
 - [数据迁移工具（v2 → v3）](./MemoryCore/scripts/migrate-v2-to-v3/README_CN.md)（如果在用旧版并想迁移存量数据）
