@@ -82,12 +82,15 @@ export default function ChatMemoryPanel(
     selected,
     layerPage,
     pageSize,
+    windowTotal,
     filtered,
     // handlers
     fetchBlocks,
     handleLayerPageChange,
     handleL0LoadMore,
     handleLayerItemLoad,
+    handleSaveLayerItem,
+    searchLayer,
     handleDeleteBlock,
     handleImport,
     handleToggleScope,
@@ -270,6 +273,7 @@ export default function ChatMemoryPanel(
                 agentLabel={agentLabel}
                 layerPage={layerPage}
                 layerPageSize={pageSize}
+                layerTotal={windowTotal}
                 layerLoading={layerLoading}
                 onLayerPageChange={handleLayerPageChange}
                 onLayerItemLoad={handleLayerItemLoad}
@@ -279,6 +283,9 @@ export default function ChatMemoryPanel(
                 timeRange={timeRange}
                 onTimeRangeChange={setTimeRange}
                 rangeTooLarge={rangeTooLarge}
+                canEdit={selected.uploaded_by_user_id === currentUserId}
+                onSaveLayerItem={handleSaveLayerItem}
+                onSearchLayer={searchLayer}
               />
             )
           }

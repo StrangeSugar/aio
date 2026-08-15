@@ -1071,49 +1071,17 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       return respondControlError(c, 400, "NOT_CHAT_MEMORY");
     }
 
-    const isOwner = asset.owner_user_id === meUserId;
-    // team-shared 必须 caller ∈ team，才算可读；否则等同 private（防止外 team 的
-    // 用户知道 asset_id 就能读走 chat_memory 内容）。tdai /v3/meta/asset/get 本身
-    // 没做这个校验，所以由 Control 层收口。
-    let isTeamShared = false;
-    if (asset.visibility === "team") {
-      isTeamShared = await isTeamMember(deps, ctx, asset.team_id, meUserId);
-    }
-    let isBorrowed = false;
-    if (!isOwner && !isTeamShared) {
-      // 遍历 caller 的 agent（限本 team），看有没有绑定过该 asset
-      try {
-        const myAgentsEnv = await deps.metaKernel.invoke(
-          "agent/list",
-          { team_id: asset.team_id, status: "active" },
-          ctx,
-        );
-        if (myAgentsEnv.code === 0) {
-          const myAgents = extractListItems<AgentRaw>(myAgentsEnv).filter(
-            (a) => a.owner_user_id === meUserId,
-          );
-          for (const a of myAgents) {
-            const bindEnv = await deps.metaKernel.invoke(
-              "agent-fixed-asset/list",
-              { agent_id: a.agent_id },
-              ctx,
-            );
-            if (bindEnv.code !== 0) continue;
-            const bindings = extractListItems<FixedAssetRaw>(bindEnv);
-            if (bindings.some((b) => b.asset_id === blockId)) {
-              isBorrowed = true;
-              break;
-            }
-          }
-        }
-      } catch {
-        /* fallthrough → deny */
-      }
-    }
-
-    if (!isOwner && !isTeamShared && !isBorrowed) {
-      return respondControlError(c, 403, "ASSET_NOT_ACCESSIBLE");
-    }
+    // 读权限（owner / team-shared / borrowed 任一即可）—— 抽到
+    // authorizeChatMemoryRead 复用，与 /chat-memory/search 共享同一套 ACL，避免
+    // 两处逻辑分叉导致的权限口径不一致。
+    const canRead = await authorizeChatMemoryRead(
+      deps,
+      ctx,
+      asset,
+      meUserId,
+      blockId,
+    );
+    if (!canRead) return respondControlError(c, 403, "ASSET_NOT_ACCESSIBLE");
 
     // chat_memory 数据是 asset owner 写入（用其 user_id 隔离），caller 未必是 owner
     // （借入场景）。用 asset.owner_user_id 作为数据面 user_id。
@@ -1565,6 +1533,249 @@ export function registerChatMemoryRoutes(api: Hono, deps: PanelDeps): void {
       }
     },
   );
+
+  // ==========================================================================
+  // POST /chat-memory/layer-update
+  //   body: { block_id, layer: 'L1'|'L2'|'L3', id?, content, summary? }
+  //
+  // 编辑单层记忆内容（Owner-only —— 与 layer-delete / clear 同口径：读可以借入，
+  // 但修改内容只允许资产 Owner，避免借入方改掉别人的记忆）：
+  //   L1 → /v3/atomic/update   { id, content }         （id = 记录主键 record_id）
+  //   L2 → /v3/scenario/write  { path, content, summary? }（path = 文件路径；content
+  //        先剥掉 META 头，内核会用现有 META 自动重建）
+  //   L3 → /v3/core/write      { content }              （内核自动 strip scene 导航）
+  // ==========================================================================
+  api.post(
+    "/chat-memory/layer-update",
+    validatePanelMetaHeaders(deps),
+    async (c) => {
+      const ctx = buildCtx(c);
+      const body = await readJson(c);
+      const blockId = requiredBlockId(body);
+      const layerRaw =
+        typeof body?.layer === "string" ? body.layer.toUpperCase() : "";
+      const content = typeof body?.content === "string" ? body.content : null;
+      const itemId = typeof body?.id === "string" ? body.id.trim() : "";
+      const summary =
+        typeof body?.summary === "string" ? body.summary : undefined;
+
+      if (!blockId) return respondControlError(c, 400, "MISSING_BLOCK_ID");
+      if (layerRaw !== "L1" && layerRaw !== "L2" && layerRaw !== "L3")
+        return respondControlError(c, 400, "INVALID_LAYER");
+      const layer = layerRaw as "L1" | "L2" | "L3";
+      if (content === null) return respondControlError(c, 400, "MISSING_CONTENT");
+      // L1（记录主键）/ L2（文件路径）都需要定位单条；L3 是整份 persona，无需 id。
+      if ((layer === "L1" || layer === "L2") && !itemId)
+        return respondControlError(c, 400, "MISSING_ITEM_ID");
+
+      const parsed = parseChatMemoryAssetId(blockId);
+      // 用户自建 UserAsset（mem-xxx）没有关联 agent，没有数据面内容可改。
+      if (!parsed) return respondControlError(c, 400, "NOT_AGENT_MEMORY");
+
+      const meUserId = await resolveCallerUserId(deps, ctx);
+      if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
+
+      const assetEnv = await deps.metaKernel.invoke(
+        "asset/get",
+        { asset_id: blockId },
+        ctx,
+      );
+      if (assetEnv.code === 404 || (assetEnv.code === 0 && !assetEnv.data)) {
+        return respondControlError(c, 404, "BLOCK_NOT_FOUND");
+      }
+      if (assetEnv.code !== 0) return respondEnvelope(c, assetEnv);
+      const asset = assetEnv.data as AssetRaw;
+      if (asset.asset_type !== "chat_memory")
+        return respondControlError(c, 400, "NOT_CHAT_MEMORY");
+      if (asset.owner_user_id !== meUserId)
+        return respondControlError(c, 403, "NOT_ASSET_OWNER");
+
+      // 数据面按 asset owner 的 user_id 隔离（与 /chat-memory/layer 一致）。
+      const idFields = {
+        team_id: parsed.teamId,
+        agent_id: parsed.agentId,
+        user_id: asset.owner_user_id,
+        session_id: "default",
+      };
+
+      const cred = toKernelCredentials(ctx, { timeoutMs: 30_000 });
+      try {
+        if (layer === "L1") {
+          const env = await deps.kernelHttp.postEnvelope<unknown>(
+            "/v3/atomic/update",
+            { ...idFields, id: itemId, content },
+            cred,
+          );
+          return respondEnvelope(c, env);
+        }
+        if (layer === "L2") {
+          const env = await deps.kernelHttp.postEnvelope<unknown>(
+            "/v3/scenario/write",
+            {
+              ...idFields,
+              path: itemId,
+              content: stripScenarioMeta(content),
+              ...(summary !== undefined ? { summary } : {}),
+            },
+            cred,
+          );
+          return respondEnvelope(c, env);
+        }
+        // L3
+        const env = await deps.kernelHttp.postEnvelope<unknown>(
+          "/v3/core/write",
+          { ...idFields, content },
+          cred,
+        );
+        return respondEnvelope(c, env);
+      } catch (err) {
+        return respondControlError(
+          c,
+          500,
+          `LAYER_UPDATE_FAILED: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+  );
+
+  // ==========================================================================
+  // POST /chat-memory/search
+  //   body: { block_id, layer: 'L0'|'L1', query, limit?, type? }
+  //
+  // 分层语义 / 关键字检索（agent 维度跨 session 召回）：
+  //   L0 → 内核 /v3/conversation/search（对话消息，返回 messages 带 score）
+  //   L1 → 内核 /v3/atomic/search（原子记忆，返回 items 带 score）
+  // 权限：读权限（owner / team-shared / borrowed，与 /chat-memory/layer 一致，
+  // 搜索属于读操作）。统一返回 { items, total }，item 附带 score（相关度）。
+  // ==========================================================================
+  api.post("/chat-memory/search", validatePanelMetaHeaders(deps), async (c) => {
+    const ctx = buildCtx(c);
+    const body = await readJson(c);
+    const blockId = requiredBlockId(body);
+    const layerRaw =
+      typeof body?.layer === "string" ? body.layer.toUpperCase() : "L1";
+    // 目前只支持 L0（对话）/ L1（原子记忆）；其余一律按 L1 处理。
+    const layer: "L0" | "L1" = layerRaw === "L0" ? "L0" : "L1";
+    const query = typeof body?.query === "string" ? body.query.trim() : "";
+    const rawLimit = typeof body?.limit === "number" ? body.limit : 30;
+    const limit = Math.min(100, Math.max(1, Math.floor(rawLimit)));
+    const type =
+      typeof body?.type === "string" && body.type.trim()
+        ? body.type.trim()
+        : undefined;
+
+    if (!blockId) return respondControlError(c, 400, "MISSING_BLOCK_ID");
+    if (!query) return respondControlError(c, 400, "MISSING_QUERY");
+
+    const parsed = parseChatMemoryAssetId(blockId);
+    // 自建 UserAsset 无关联 agent → 无 L1 数据可搜，直接返空（与 layer 语义一致）。
+    if (!parsed)
+      return respondEnvelope(c, okEnvelope(c, { items: [], total: 0 }));
+
+    const meUserId = await resolveCallerUserId(deps, ctx);
+    if (!meUserId) return respondControlError(c, 401, "INVALID_USER_KEY");
+
+    const assetEnv = await deps.metaKernel.invoke(
+      "asset/get",
+      { asset_id: blockId },
+      ctx,
+    );
+    if (assetEnv.code === 404 || (assetEnv.code === 0 && !assetEnv.data)) {
+      return respondControlError(c, 404, "BLOCK_NOT_FOUND");
+    }
+    if (assetEnv.code !== 0) return respondEnvelope(c, assetEnv);
+    const asset = assetEnv.data as AssetRaw;
+    if (asset.asset_type !== "chat_memory")
+      return respondControlError(c, 400, "NOT_CHAT_MEMORY");
+
+    const canRead = await authorizeChatMemoryRead(
+      deps,
+      ctx,
+      asset,
+      meUserId,
+      blockId,
+    );
+    if (!canRead) return respondControlError(c, 403, "ASSET_NOT_ACCESSIBLE");
+
+    const idFields = {
+      team_id: parsed.teamId,
+      agent_id: parsed.agentId,
+      user_id: asset.owner_user_id,
+      session_id: "default",
+    };
+    const cred = toKernelCredentials(ctx, { timeoutMs: 30_000 });
+    try {
+      if (layer === "L0") {
+        // L0：对话消息检索。内核返回 { messages }，映射为统一的 { items }。
+        // 不传 session_id（全局跨 session 召回，与 /chat-memory/layer 读 L0 一致）。
+        const { session_id: _drop, ...noSid } = idFields;
+        void _drop;
+        const env = await deps.kernelHttp.postEnvelope<{
+          messages?: unknown[];
+        }>("/v3/conversation/search", { ...noSid, query, limit }, cred);
+        if (env.code !== 0) return respondEnvelope(c, env);
+        const data =
+          (env.data as { messages?: Array<Record<string, unknown>> } | null) ??
+          { messages: [] };
+        const items = (data.messages ?? []).map((m) => ({
+          id: (m.id ?? "") as string,
+          role: typeof m.role === "string" ? m.role : "msg",
+          title: (typeof m.role === "string" ? m.role : "msg") as string,
+          body:
+            typeof m.content === "string"
+              ? m.content
+              : JSON.stringify(m.content ?? ""),
+          tags: typeof m.role === "string" ? [m.role] : [],
+          refs: [] as string[],
+          score: typeof m.score === "number" ? m.score : undefined,
+          created_at:
+            (typeof m.timestamp === "string" && m.timestamp) ||
+            msToIso(m.recorded_at) ||
+            msToIso(m.timestamp) ||
+            undefined,
+        }));
+        return respondEnvelope(
+          c,
+          okEnvelope(c, { items, total: items.length }),
+        );
+      }
+
+      // L1：原子记忆检索
+      const env = await deps.kernelHttp.postEnvelope<{ items?: unknown[] }>(
+        "/v3/atomic/search",
+        { ...idFields, query, limit, ...(type ? { type } : {}) },
+        cred,
+      );
+      if (env.code !== 0) return respondEnvelope(c, env);
+      const data =
+        (env.data as { items?: Array<Record<string, unknown>> } | null) ?? {
+          items: [],
+        };
+      const items = (data.items ?? []).map((r) => ({
+        // 搜索结果 id 即 L1 记录主键（可直接用于 /chat-memory/layer-update）。
+        id: (r.id ?? r.record_id ?? "") as string,
+        title: (r.type ?? "atomic") as string,
+        body: (r.content ?? "") as string,
+        tags: Array.isArray(r.tags) ? (r.tags as string[]) : [],
+        refs: [] as string[],
+        score: typeof r.score === "number" ? r.score : undefined,
+        created_at:
+          (typeof r.created_at === "string" && r.created_at) ||
+          msToIso(r.created_time_ms) ||
+          (typeof r.updated_at === "string" ? r.updated_at : undefined),
+      }));
+      return respondEnvelope(
+        c,
+        okEnvelope(c, { items, total: items.length }),
+      );
+    } catch (err) {
+      return respondControlError(
+        c,
+        500,
+        `SEARCH_FAILED: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  });
 }
 
 /**
@@ -1677,6 +1888,19 @@ function buildSummary(): string {
   return "0 条 L1 · 0 条 L2 · 0 条 L3";
 }
 
+/**
+ * 去掉 scenario markdown 的 META 头。
+ * `scenario/read` 返回的 content 带 `-----META-START-----...-----META-END-----`
+ * 头（created / updated / summary 等系统字段），而 `scenario/write` 期望正文
+ * **不含** META（内核会用现有 META 自动重建）。编辑写回前先剥掉 META，避免
+ * META 被当成正文再包一层导致嵌套。
+ */
+function stripScenarioMeta(content: string): string {
+  return content
+    .replace(/^-----META-START-----\n[\s\S]*?\n-----META-END-----\n?/, "")
+    .replace(/^\n+/, "");
+}
+
 function stripL3SceneTail(content: string): string {
   const withFooter = content.search(
     /\n---\s*\n\s*> \*\*最后更新\*\*[\s\S]*?\n---\s*\n## 🗺️ Scene Navigation/,
@@ -1762,6 +1986,53 @@ async function isTeamMember(
   } catch {
     return false;
   }
+}
+
+/**
+ * chat_memory 资产的**读权限**判定（owner / team-shared / borrowed 任一即可）：
+ *   a) caller 是 asset 的 owner（自留自用）
+ *   b) asset.visibility='team' 且 caller ∈ team（团队已共享；外 team 用户即便知道
+ *      asset_id 也不算可读，防止越权读取 chat_memory 内容）
+ *   c) asset 已被绑定到 caller 名下某个 agent（借入关系）
+ * 供 /chat-memory/layer 与 /chat-memory/search 复用，保证读口径一致。
+ */
+async function authorizeChatMemoryRead(
+  deps: PanelDeps,
+  ctx: MetaCallContext,
+  asset: AssetRaw,
+  meUserId: string,
+  blockId: string,
+): Promise<boolean> {
+  if (asset.owner_user_id === meUserId) return true;
+  if (asset.visibility === "team") {
+    if (await isTeamMember(deps, ctx, asset.team_id, meUserId)) return true;
+  }
+  // 借入判定：遍历 caller 在本 team 下 owner 的 agent，看有没有绑定过该 asset。
+  try {
+    const myAgentsEnv = await deps.metaKernel.invoke(
+      "agent/list",
+      { team_id: asset.team_id, status: "active" },
+      ctx,
+    );
+    if (myAgentsEnv.code === 0) {
+      const myAgents = extractListItems<AgentRaw>(myAgentsEnv).filter(
+        (a) => a.owner_user_id === meUserId,
+      );
+      for (const a of myAgents) {
+        const bindEnv = await deps.metaKernel.invoke(
+          "agent-fixed-asset/list",
+          { agent_id: a.agent_id },
+          ctx,
+        );
+        if (bindEnv.code !== 0) continue;
+        const bindings = extractListItems<FixedAssetRaw>(bindEnv);
+        if (bindings.some((b) => b.asset_id === blockId)) return true;
+      }
+    }
+  } catch {
+    /* fallthrough → deny */
+  }
+  return false;
 }
 
 // countBindings 已随 team-assets 的 N+1 优化下线；未来若右侧详情面板要按需拉

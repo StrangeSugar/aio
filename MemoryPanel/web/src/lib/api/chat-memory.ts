@@ -33,6 +33,11 @@ export interface ChatMemoryLayerItem {
   created_at?: string;
 }
 
+/** L1 语义搜索命中项：在分层条目基础上附带相关度 score（越大越相关） */
+export interface ChatMemorySearchHit extends ChatMemoryLayerItem {
+  score?: number;
+}
+
 const CHAT_MEMORY_PREFIX = '/api/v1/chat-memory';
 
 async function chatMemoryCall<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
@@ -155,5 +160,43 @@ export const chatMemoryApi = {
       agent_id: params.agentId,
       messages: params.messages,
       session_id: params.sessionId,
+    }),
+
+  /** 编辑单层记忆内容（Owner-only）：
+   *  L1 传 id=记录主键 + content；L2 传 id=文件路径 + content（可选 summary）；
+   *  L3 只传 content（整份 core persona 覆盖写）。 */
+  updateLayer: (
+    blockId: string,
+    layer: 'L1' | 'L2' | 'L3',
+    params: { id?: string; content: string; summary?: string },
+  ) =>
+    chatMemoryCall<{
+      id?: string;
+      path?: string;
+      version?: string;
+      updated_at?: string;
+    }>('layer-update', {
+      block_id: blockId,
+      layer,
+      ...(params.id ? { id: params.id } : {}),
+      content: params.content,
+      ...(params.summary !== undefined ? { summary: params.summary } : {}),
+    }),
+
+  /** 分层语义 / 关键字搜索（agent 维度跨 session 召回，命中项带 score）：
+   *  L0 = 对话消息检索；L1 = 原子记忆检索。 */
+  searchLayer: (
+    blockId: string,
+    layer: 'L0' | 'L1',
+    query: string,
+    limit = 30,
+    type?: string,
+  ) =>
+    chatMemoryCall<{ items: ChatMemorySearchHit[]; total: number }>('search', {
+      block_id: blockId,
+      layer,
+      query,
+      limit,
+      ...(type ? { type } : {}),
     }),
 };

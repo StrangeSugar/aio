@@ -90,8 +90,12 @@ export const agentsApi = {
   },
 
   /** 获取 agent 的资产聚合视图（binding + asset 详情）。
-   *  用 metaListAll 翻页拉全量（list-with-detail 默认 limit 20，绑定资产一多会被截断）。 */
-  getAssets: async (agentId: string) => {
+   *  用 metaListAll 翻页拉全量（list-with-detail 默认 limit 20，绑定资产一多会被截断）。
+   *
+   *  applyVisibilityFilter：默认 true（屏蔽已私密的绑定，用于普通展示）。
+   *  owner 视角管理自己的资产时应传 false —— 否则自己 owner 的 private skill
+   *  会被接口过滤掉，导致 fixed tab 拿不到它的 visibility、共享/私密切换按钮消失。 */
+  getAssets: async (agentId: string, applyVisibilityFilter = true) => {
     const items = await metaListAll<{
       asset_id: string;
       asset_type: AssetType;
@@ -104,7 +108,7 @@ export const agentsApi = {
       created_at: string;
     }>('agent-fixed-asset/list-with-detail', {
       agent_id: agentId,
-      apply_visibility_filter: true,
+      apply_visibility_filter: applyVisibilityFilter,
       touch_usage: false,
     });
     return items.map((item) => ({

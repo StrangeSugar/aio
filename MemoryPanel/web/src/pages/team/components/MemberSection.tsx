@@ -354,7 +354,7 @@ export function AddMemberDialog({
             - 开：走 user/create-with-key，把用户指定的 key 作为默认 key
           */}
           <Form.Item label={t('addMember.customKey.label')}>
-            <div className="flex items-center gap-2">
+            <div>
               <Switch
                 value={customKeyEnabled}
                 onChange={(v) => {
@@ -363,7 +363,7 @@ export function AddMemberDialog({
                   if (!v) setCustomKey('');
                 }}
               />
-              <span className="_memory-field-hint">{t('addMember.customKey.hint')}</span>
+              <div className="_memory-field-hint">{t('addMember.customKey.hint')}</div>
             </div>
           </Form.Item>
 

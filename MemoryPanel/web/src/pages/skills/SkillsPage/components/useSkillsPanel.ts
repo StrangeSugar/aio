@@ -5,7 +5,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { assetsApi, agentsApi, type Asset } from '@/lib/teamApi';
-import { listSkills, getSkill, deleteSkillV3, exportSkill, type SkillSummary } from '@/lib/skill-api';
+import {
+  listSkills,
+  getSkill,
+  deleteSkillV3,
+  exportSkill,
+  type SkillSummary,
+} from '@/lib/skill-api';
 import { getPanelSession } from '@/lib/panelSession';
 import { useTeams } from '@/services';
 import { useSkillDetailCache } from '@/services/use-skill-detail-cache';
@@ -45,7 +51,9 @@ export function useSkillsPanel() {
       setAgentNameMap({});
       setTeamAgents([]);
       setAgentsLoading(false);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     setAgentsLoading(true);
     agentsApi
@@ -69,7 +77,9 @@ export function useSkillsPanel() {
       .finally(() => {
         if (!cancelled) setAgentsLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [activeTeamId, myUserId]);
 
   const [loading, setLoading] = useState(false);
@@ -86,7 +96,11 @@ export function useSkillsPanel() {
   // team tab 列表数据源是 asset/list-accessible，不含 skill 数据面的
   // version / owner_agent_id；不再对每条 skill 并发 N 次 getSkill()，
   // 改为用户选中后才按需拉取并写入此缓存。
-  const { applyCachedDetail, preload: preloadSkillDetail, cacheVersion } = useSkillDetailCache(activeTeamId);
+  const {
+    applyCachedDetail,
+    preload: preloadSkillDetail,
+    cacheVersion,
+  } = useSkillDetailCache(activeTeamId);
 
   // 对 skills 列表应用缓存：已拉过的 skill 更新为真实 version / owner_agent_id。
   const skillsWithCache = useMemo(
@@ -171,33 +185,27 @@ export function useSkillsPanel() {
       } else {
         // 固定资产 = 指定 agent 拥有（owner）的 skill；这一 tab 侧重"某 agent 装备了什么"，
         // 由 owner 权限判定即可，不再叠加 visibility 过滤（agent owner 一定能看到自己的 skill）。
-        const list: SkillSummary[] = selectedAgent
-          ? (
-              await listSkills({
-                team_id: activeTeamId,
-                filters: { owner_agent_id: selectedAgent, status: ['active'] },
-                pagination: { limit: 200 },
-              })
-            ).items
-          : [];
-        if (seq !== refreshSeqRef.current) return; // 已被后续请求取代
-        setSkills(list);
-        // fixed tab 的共享/私密切换需要每条 skill 的 visibility。
-        // 之前这里拉全量 asset/list-accessible（整个 team 的可见资产池）再前端过滤，
-        // 数据量大且与 team tab 重复。改为按当前 agent 拉固定资产（list-with-detail），
-        // 只取该 agent 绑定资产的 visibility，数据量小、语义也对齐"某 agent 装备了什么"。
-        if (list.length > 0) {
-          try {
-            const bound = await agentsApi.getAssets(selectedAgent);
-            if (seq !== refreshSeqRef.current) return;
-            const vm: Record<string, Asset['visibility']> = {};
-            for (const a of bound) {
-              if (a.asset_type === 'skill') vm[a.asset_id] = a.visibility as Asset['visibility'];
-            }
-            setVisibilityMap(vm);
-          } catch { setVisibilityMap({}); }
-        } else {
+        // meta_assets 主表，与 assetsApi.update 写入同源，读写一致。
+        if (!selectedAgent) {
+          if (seq !== refreshSeqRef.current) return;
+          setSkills([]);
           setVisibilityMap({});
+        } else {
+          const [listRes, accessible] = await Promise.all([
+            listSkills({
+              team_id: activeTeamId,
+              filters: { owner_agent_id: selectedAgent, status: ['active'] },
+              pagination: { limit: 200 },
+            }),
+            assetsApi
+              .listAccessible(activeTeamId, { asset_type: 'skill', action: 'read' })
+              .catch(() => [] as Asset[]),
+          ]);
+          if (seq !== refreshSeqRef.current) return; // 已被后续请求取代
+          const vm: Record<string, Asset['visibility']> = {};
+          for (const a of accessible) vm[a.asset_id] = a.visibility;
+          setSkills(listRes.items);
+          setVisibilityMap(vm);
         }
       }
     } catch (err) {
@@ -232,9 +240,8 @@ export function useSkillsPanel() {
     // asset/list-accessible 与选中 agent 无关。若把 selectedAgent 纳入 team 的 key，
     // teamAgents 异步加载完后 selectedAgent 会从 '' 变成首个 agent，导致 key 变化、
     // 再触发一次**完全重复**的 list-accessible（进页面即多打一次接口）。
-    const key = tab === 'fixed'
-      ? `${activeTeamId}|${tab}|${selectedAgent}`
-      : `${activeTeamId}|${tab}`;
+    const key =
+      tab === 'fixed' ? `${activeTeamId}|${tab}|${selectedAgent}` : `${activeTeamId}|${tab}`;
     if (fetchKeyRef.current === key) return;
     fetchKeyRef.current = key;
     void refresh();
@@ -252,52 +259,58 @@ export function useSkillsPanel() {
   }, [skillsWithCache, selectedSkillId, loading]);
 
   const selectedSkill = useMemo(
-    () => (selectedSkillId ? skillsWithCache.find((s) => s.skill_id === selectedSkillId) ?? null : null),
-    [selectedSkillId, skillsWithCache]
+    () =>
+      selectedSkillId
+        ? (skillsWithCache.find((s) => s.skill_id === selectedSkillId) ?? null)
+        : null,
+    [selectedSkillId, skillsWithCache],
   );
 
   // ============================
   // Delete handler
   // ============================
 
-  const handleDelete = useCallback(async (skill: SkillSummary) => {
-    if (!activeTeamId) return;
-    setDeleteLoading(true);
-    try {
-      // 数据面软删除需要 owner_agent_id + expected_version 乐观锁。
-      // 团队 tab 数据源来自 asset/list-accessible，那份数据没有 owner_agent_id
-      // 和 version（asset 表无这两字段），列表里 skill.owner_agent_id 会是 ''。
-      // 这里按需再拉一次 skill/get 补齐。
-      let ownerAgentId = skill.owner_agent_id;
-      let version = skill.version;
-      if (!ownerAgentId) {
-        const full = await getSkill({
-          skill_id: skill.skill_id,
+  const handleDelete = useCallback(
+    async (skill: SkillSummary) => {
+      if (!activeTeamId) return;
+      setDeleteLoading(true);
+      try {
+        // 数据面软删除需要 owner_agent_id + expected_version 乐观锁。
+        // 团队 tab 数据源来自 asset/list-accessible，那份数据没有 owner_agent_id
+        // 和 version（asset 表无这两字段），列表里 skill.owner_agent_id 会是 ''。
+        // 这里按需再拉一次 skill/get 补齐。
+        let ownerAgentId = skill.owner_agent_id;
+        let version = skill.version;
+        if (!ownerAgentId) {
+          const full = await getSkill({
+            skill_id: skill.skill_id,
+            team_id: activeTeamId,
+            include_content: false,
+            include_manifest: false,
+          });
+          ownerAgentId = full.owner_agent_id;
+          version = full.version;
+        }
+        await deleteSkillV3({
+          user_id: myUserId,
           team_id: activeTeamId,
-          include_content: false,
-          include_manifest: false,
+          agent_id: ownerAgentId,
+          skill_id: skill.skill_id,
+          expected_version: version,
         });
-        ownerAgentId = full.owner_agent_id;
-        version = full.version;
+        if (selectedSkillId === skill.skill_id) {
+          setSelectedSkillId(null);
+        }
+        tea.notify.success(t('skills.notify.deleted', { name: skill.name }));
+        void refresh();
+      } catch (err) {
+        tea.notify.error(err);
+      } finally {
+        setDeleteLoading(false);
       }
-      await deleteSkillV3({
-        user_id: myUserId,
-        team_id: activeTeamId,
-        agent_id: ownerAgentId,
-        skill_id: skill.skill_id,
-        expected_version: version,
-      });
-      if (selectedSkillId === skill.skill_id) {
-        setSelectedSkillId(null);
-      }
-      tea.notify.success(t('skills.notify.deleted', { name: skill.name }));
-      void refresh();
-    } catch (err) {
-      tea.notify.error(err);
-    } finally {
-      setDeleteLoading(false);
-    }
-  }, [selectedSkillId, refresh, activeTeamId, myUserId]);
+    },
+    [selectedSkillId, refresh, activeTeamId, myUserId],
+  );
 
   // ============================
   // Export handler
@@ -332,9 +345,10 @@ export function useSkillsPanel() {
         tea.notify.warning(t('skills.export.partial', { warnings: result.warnings.join('; ') }));
       }
     } catch (err: any) {
-      const msg = err?.name === 'AbortError' || err?.name === 'TimeoutError'
-        ? t('skills.export.timeout')
-        : (err?.message ?? String(err));
+      const msg =
+        err?.name === 'AbortError' || err?.name === 'TimeoutError'
+          ? t('skills.export.timeout')
+          : (err?.message ?? String(err));
       tea.notify.error({ description: msg });
     } finally {
       setExportLoading(false);
@@ -349,7 +363,10 @@ export function useSkillsPanel() {
   const handleToggleVisibility = useCallback(
     async (skill: SkillSummary, scope: 'team' | 'private') => {
       const current = visibilityMap[skill.skill_id];
-      if (!current || current === scope) return;
+      // current 缺失时按 private 兜底：owner 视角下 getAssets 已不过滤，
+      // 正常都能拿到 visibility；万一仍缺失（旧数据/接口异常），也允许
+      // 切换而非直接 return，避免又卡死无法切回 team。
+      if (current === scope) return;
       try {
         await assetsApi.update(skill.skill_id, { visibility: scope });
         // 局部更新 visibility 徽章，避免整表 flicker

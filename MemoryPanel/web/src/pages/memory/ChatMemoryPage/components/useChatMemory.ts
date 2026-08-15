@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { useAgents, useTeams } from '@/services';
 import { readAuth } from '@/components/LoginGate';
 import { tea } from '@/lib/tea-bridge';
-import { chatMemoryApi, type ChatMemoryBlock } from '@/lib/teamApi';
+import { chatMemoryApi, type ChatMemoryBlock, type ChatMemorySearchHit } from '@/lib/teamApi';
 import { type MemoryBlock, type MemoryLayer, type ScopeTab } from './types';
 import { useScopeTabLabels } from './constants';
 import {
@@ -18,6 +18,7 @@ import {
   mapLayerItem,
   type TimeRange,
 } from './memory-utils';
+import { getLayerCount } from './utils';
 
 export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
   const { t } = useTranslation();
@@ -37,6 +38,12 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [layer, setLayer] = useState<MemoryLayer>('L1');
   const [layerPages, setLayerPages] = useState<
+    Record<string, Partial<Record<MemoryLayer, number>>>
+  >({});
+  // 各层「当前时间窗口内」的总条数（key: `${blockId}|${layer}`）。
+  // layerCounts 存的是全量总数（选中块时 limit=1 拿到的）；带时间筛选（L0/L1）
+  // 时 BFF 返回的 res.total 才是窗口内数量，分页必须用它，否则页数虚高。
+  const [windowTotals, setWindowTotals] = useState<
     Record<string, Partial<Record<MemoryLayer, number>>>
   >({});
   const [layerLoading, setLayerLoading] = useState(false);
@@ -159,6 +166,10 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
   );
   const layerPage = selected?.id ? (layerPages[selected.id]?.[layer] ?? 0) : 0;
   const pageSize = layerPageSize(layer);
+  /** 当前层「当前时间窗口内」的总条数；无窗口缓存时回退全量总数（L2/L3 恒等于全量） */
+  const windowTotal = selected?.id
+    ? (windowTotals[selected.id]?.[layer] ?? getLayerCount(selected, layer))
+    : 0;
 
   // ── 层计数：选中块即并行拉取四层计数 ──
   // 业务确认：teamAssets / agentFixed / myAgents 返回的 layer_counts 不可靠，
@@ -197,6 +208,11 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
     setRangeTooLarge(false);
   }, [selected?.id]);
 
+  // 切块 / 时间范围变化时，窗口内总数缓存作废（翻页与总数必须按新窗口重新计算）
+  useEffect(() => {
+    setWindowTotals({});
+  }, [selected?.id, timeRange.start, timeRange.end]);
+
   useEffect(() => {
     if (!selected?.id) {
       setLayerLoading(false);
@@ -222,6 +238,12 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
       .then((res) => {
         if (cancelled) return;
         setRangeTooLarge(false);
+        // 带时间筛选时 res.total 是「当前时间窗口内」的数量，单独保存供分页用
+        // （layerCounts 仍是全量总数，不能动）。L2/L3 无时间维度，窗口总数 = 全量。
+        setWindowTotals((prev) => ({
+          ...prev,
+          [selected.id]: { ...(prev[selected.id] ?? {}), [layer]: res.total },
+        }));
         setBlocks((prev) =>
           prev.map((b) => {
             if (b.id !== selected.id) return b;
@@ -390,6 +412,47 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
     [selected?.id, selected?.layers.L2, layer, t],
   );
 
+  // ── 编辑：保存单层内容（Owner-only；成功后乐观更新对应条目 body） ──
+  // L1 = content 覆盖；L2 = 整份 scenario 正文覆盖（BFF 会剥 META 后写、内核重建 META）；
+  // L3 = 整份 core persona 覆盖。失败时抛出，交由调用方（编辑弹窗）保留输入并提示。
+  const handleSaveLayerItem = useCallback(
+    async (targetLayer: 'L1' | 'L2' | 'L3', itemId: string, content: string) => {
+      if (!selected?.id) return;
+      await chatMemoryApi.updateLayer(selected.id, targetLayer, {
+        id: itemId,
+        content,
+      });
+      setBlocks((prev) =>
+        prev.map((b) => {
+          if (b.id !== selected.id) return b;
+          return {
+            ...b,
+            layers: {
+              ...b.layers,
+              [targetLayer]: b.layers[targetLayer].map((item) =>
+                item.id === itemId ? { ...item, body: content } : item,
+              ),
+            },
+          };
+        }),
+      );
+      tea.notify.success(t('memory.notify.editSuccess'));
+    },
+    [selected?.id, t],
+  );
+
+  // ── 搜索：L0（对话）/ L1（原子记忆）语义 / 关键字检索 ──
+  // 跨 session 召回，返回带 score 的命中项；结果 state 交由 BlockDetail 管理，
+  // 这里只提供请求函数（依赖当前选中块）。
+  const searchLayer = useCallback(
+    async (targetLayer: 'L0' | 'L1', query: string): Promise<ChatMemorySearchHit[]> => {
+      if (!selected?.id) return [];
+      const res = await chatMemoryApi.searchLayer(selected.id, targetLayer, query, 30);
+      return res.items ?? [];
+    },
+    [selected?.id],
+  );
+
   // ── 过滤与辅助 ──
   const filtered = useMemo(() => {
     if (scopeTab === 'fixed')
@@ -536,12 +599,15 @@ export function useChatMemory(props: { activeTeamId?: string | null } = {}) {
     selected,
     layerPage,
     pageSize,
+    windowTotal,
     filtered,
     // handlers
     fetchBlocks,
     handleLayerPageChange,
     handleL0LoadMore,
     handleLayerItemLoad,
+    handleSaveLayerItem,
+    searchLayer,
     handleDeleteBlock,
     handleImport,
     handleToggleScope,

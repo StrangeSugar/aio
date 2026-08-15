@@ -196,7 +196,9 @@
   white-space: nowrap;
 }
 
-/* 删除按钮：hover/selected 时显示 */
+/* 删除按钮：hover/selected 时显示。
+   列表项容器已重构为通用 _alp-item（见 AssetListPanel），
+   旧选择器 _memory-skill-item:hover 已失效导致按钮永远隐藏，改为挂到 _alp-item 上。 */
 ._memory-skill-item-delete {
   visibility: hidden;
   opacity: 0;
@@ -206,8 +208,8 @@
   flex-shrink: 0;
 }
 
-._memory-skill-item:hover ._memory-skill-item-delete,
-._memory-skill-item.is-selected ._memory-skill-item-delete {
+._alp-item:hover ._memory-skill-item-delete,
+._alp-item--selected ._memory-skill-item-delete {
   visibility: visible;
   opacity: 1;
 }

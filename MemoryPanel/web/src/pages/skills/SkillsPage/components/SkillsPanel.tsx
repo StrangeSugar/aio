@@ -256,8 +256,10 @@ export default function SkillsPanel({
                   </AssetItemBadges>
 
                   {/* 共享/私密切换：原「个人资产」tab 的能力，迁到「Agent 资产」tab，
-                      仅 owner 可切；借入/只读的 skill 不显示 */}
-                  {tab === 'fixed' && ownerIsMe && vis && (
+                      仅 owner 可切；owner 视角 getAssets 已关闭 visibility 过滤，
+                      private skill 也能拿到 vis。即便 vis 偶发缺失也按 private 兜底渲染，
+                      避免 skill 被切成 private 后切换按钮消失、无法再切回 team。 */}
+                  {tab === 'fixed' && ownerIsMe && (
                     <div style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
                       <Segment
                         value={vis === 'team' ? 'team' : 'private'}

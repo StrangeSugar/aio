@@ -39,6 +39,23 @@ export function shouldShowOnboarding(userId?: string): boolean {
   }
 }
 
+/**
+ * 重置「已看过引导」标记。
+ *
+ * 用户在「我的资料 → 回顾引导」手动触发：清掉 onboarded 标记，下次进主面板
+ * useEffect 检测 shouldShowOnboarding() === true 会再次自动弹出。
+ *
+ * 注意：调用方还需把 OnboardingGuide 的 visible 设回 true，因为之前的 close()
+ * 已经把内部 current 推进到 -1 并调了 onClose，仅清标记不足以重新打开。
+ */
+export function resetOnboarding(userId?: string): void {
+  try {
+    window.localStorage.removeItem(onboardedKey(userId));
+  } catch {
+    /* localStorage 不可用时静默忽略 */
+  }
+}
+
 function markOnboarded(userId?: string): void {
   try {
     window.localStorage.setItem(onboardedKey(userId), '1');
@@ -133,7 +150,9 @@ const AGENT_BIND_STEP: OnboardingStep = {
 const ASSET_STEPS: OnboardingStep[] = [
   {
     path: '/wiki',
-    selector: '[data-guide="create-wiki"]',
+    // 优先框「新建 Wiki」按钮；按钮缺失（固定资产 tab / 无 team）时回退到顶部 Wiki tab，
+    // 而不是回退到 logo，避免框错区域。
+    selector: ['[data-guide="create-wiki"]', '[data-guide="tab-wiki"]'],
     // ActionPanel 左侧"新建 Wiki"按钮：向右展开
     placement: 'bottom-start',
     titleKey: 'onboarding.guide.asset.wiki.title',
@@ -141,7 +160,8 @@ const ASSET_STEPS: OnboardingStep[] = [
   },
   {
     path: '/code',
-    selector: '[data-guide="create-code"]',
+    // 优先框「注册仓库」按钮；按钮缺失时回退到顶部 Code tab。
+    selector: ['[data-guide="create-code"]', '[data-guide="tab-code"]'],
     // ActionPanel 左侧"注册仓库"按钮：向右展开
     placement: 'bottom-start',
     titleKey: 'onboarding.guide.asset.code.title',

@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useCurrentRole, type TeamRole } from '@/services/useCurrentRole';
 import { GlobalHeader } from '@/layouts/GlobalHeader';
 import { TabBar } from '@/layouts/TabBar';
-import { OnboardingGuide, shouldShowOnboarding } from '@/layouts/OnboardingGuide';
+import { OnboardingGuide, shouldShowOnboarding, resetOnboarding } from '@/layouts/OnboardingGuide';
 import { ITEM_ICON, usePageMeta, GROUP_ORDER_KEYS, type PageId } from '@/constants/menu';
 
 const { Body, Sider, Content } = Layout;
@@ -86,6 +86,18 @@ export function ConsoleLayout() {
     }
   }, [currentUserId]);
 
+  /**
+   * 回顾引导入口（由 GlobalHeader 的「我的资料 → 回顾引导」菜单项触发）：
+   * 清掉 onboarded 标记 + 把 Guide 重新置为可见。
+   * 必须先清标记再 setVisible，否则 Guide 内部的 close→markOnboarded 链路里
+   * 立刻又会重新标记为已看过（虽然本次不冲突，但下次自动判定仍会按"已看过"处理）。
+   */
+  const handleReplayOnboarding = useCallback(() => {
+    if (!currentUserId) return;
+    resetOnboarding(currentUserId);
+    setOnboardingVisible(true);
+  }, [currentUserId]);
+
   const navigateTo = useCallback(
     (id: PageId) => {
       const path = PAGE_TO_PATH[id];
@@ -157,6 +169,8 @@ export function ConsoleLayout() {
         userRole={userRole}
         currentUser={auth?.user ?? ''}
         currentUserId={auth?.user_id}
+        instanceName={auth?.instance_name}
+        onReplayOnboarding={currentUserId ? handleReplayOnboarding : undefined}
         onLogout={logout}
       />
       <Layout>
@@ -191,3 +205,4 @@ export function ConsoleLayout() {
     </div>
   );
 }
+ 

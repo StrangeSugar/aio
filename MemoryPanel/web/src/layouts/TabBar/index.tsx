@@ -29,6 +29,7 @@ export function TabBar({
             role="tab"
             tabIndex={0}
             aria-selected={isActive}
+            data-guide={`tab-${id}`}
             onClick={() => onNavigate(id)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
