@@ -75,3 +75,13 @@
   border-radius: 4px;
   background: var(--tea-color-bg-secondary-default);
 }
+
+/* MCP 接入：pre 块等宽字体 + 选中高亮 */
+._memory-apikey-endpoints pre {
+  tab-size: 2;
+}
+
+._memory-apikey-endpoints pre::selection,
+._memory-apikey-endpoints pre code::selection {
+  background: var(--tea-color-bg-primary-hover);
+}

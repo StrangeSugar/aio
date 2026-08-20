@@ -47,6 +47,10 @@ export default function CodeSourcesPanel() {
     setFormRepo,
     formBranch,
     setFormBranch,
+    formUsername,
+    setFormUsername,
+    formPassword,
+    setFormPassword,
     submitting,
     // allocate
     allocateTarget,
@@ -471,6 +475,23 @@ export default function CodeSourcesPanel() {
                       value={formBranch}
                       onChange={setFormBranch}
                       placeholder="main"
+                    />
+                  </Form.Item>
+                  <Form.Item label={t('code.register.username')} extra={t('code.register.usernameExtra')}>
+                    <Input
+                      size="full"
+                      value={formUsername}
+                      onChange={setFormUsername}
+                      placeholder={t('code.register.usernamePlaceholder')}
+                    />
+                  </Form.Item>
+                  <Form.Item label={t('code.register.password')} extra={t('code.register.passwordExtra')}>
+                    <Input
+                      size="full"
+                      type="password"
+                      value={formPassword}
+                      onChange={setFormPassword}
+                      placeholder={t('code.register.passwordPlaceholder')}
                     />
                   </Form.Item>
                 </Form>

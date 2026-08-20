@@ -189,6 +189,8 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
 
     const branch = typeof body.branch === "string" && body.branch ? body.branch : "main";
     const repoName = typeof body.repo_name === "string" ? body.repo_name : undefined;
+    const username = typeof body.username === "string" ? body.username : undefined;
+    const password = typeof body.password === "string" ? body.password : undefined;
 
     const { row, existed } = cgService.create({
       service_id: idFields.service_id,
@@ -196,6 +198,8 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
       repo_url: repoUrl,
       branch,
       repo_name: repoName,
+      username,
+      password,
       owner_user_id: idFields.user_id,
       user_id: idFields.user_id,
       agent_id: idFields.agent_id,
@@ -280,6 +284,36 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
       return c.json({ code: 409, message: "busy", data: { status: result.status, step: result.step } }, 409);
     }
     return c.json(wrapOk({ code_graph_id: result.row.code_graph_id, status: result.row.status }), 202);
+  });
+
+  app.post("/allocate", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = c.req.header("x-tdai-service-id");
+    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const cgId = typeof body.code_graph_id === "string" ? body.code_graph_id : "";
+    if (!isValidIdSegment(cgId)) return c.json(wrapError(400, "code_graph_id is required"), 400);
+    const agentId = typeof body.agent_id === "string" ? body.agent_id : "";
+    if (!agentId) return c.json(wrapError(400, "agent_id is required"), 400);
+
+    const row = cgService.getById(serviceId, cgId);
+    if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+
+    cgService.allocate(serviceId, cgId, agentId);
+    return c.json(wrapOk({ ok: true }));
+  });
+
+  app.post("/unbind", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = c.req.header("x-tdai-service-id");
+    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const cgId = typeof body.code_graph_id === "string" ? body.code_graph_id : "";
+    if (!isValidIdSegment(cgId)) return c.json(wrapError(400, "code_graph_id is required"), 400);
+
+    const row = cgService.getById(serviceId, cgId);
+    if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+
+    cgService.unbind(serviceId, cgId);
+    return c.json(wrapOk({ ok: true }));
   });
 
   app.post("/delete", async (c) => {

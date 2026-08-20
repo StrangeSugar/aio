@@ -311,6 +311,21 @@ export class WikiService {
     return this.store.countWikis(serviceId, teamId, opts);
   }
 
+  /** 按 agent_id 查询绑定的 wiki 列表 */
+  listWikisByAgent(serviceId: string, agentId: string): WikiRow[] {
+    return this.store.listWikisByAgent(serviceId, agentId);
+  }
+
+  /** 绑定 wiki 到 agent */
+  allocate(serviceId: string, wikiId: string, agentId: string): void {
+    this.store.updateWikiAgentId(serviceId, wikiId, agentId);
+  }
+
+  /** 解绑 wiki 从 agent */
+  unbind(serviceId: string, wikiId: string): void {
+    this.store.unbindWiki(serviceId, wikiId);
+  }
+
   /**
    * 删除 wiki（008 / 007 §5.5）。任何状态均可删（含 pending/processing）。
    * memory/team 不匹配返回 false；否则硬删 + 四类资源清理，返回 true。

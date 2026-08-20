@@ -1,0 +1,10 @@
+{
+  "instances": [
+    {
+      "id": "default",
+      "name": "本地默认实例",
+      "gateway_endpoint": "http://tdai-memory-core:8420",
+      "api_key": "sk-mem-iYD2l74WUOZDbhYTckGt9qLazZNZBXcB"
+    }
+  ]
+}

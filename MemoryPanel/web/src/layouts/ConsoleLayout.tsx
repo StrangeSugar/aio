@@ -18,11 +18,9 @@ const { Body, Sider, Content } = Layout;
 
 /** 路由 path → PageId */
 const PATH_TO_PAGE: Record<string, PageId> = {
-  '/': 'workbench_board',
+  '/': 'wiki',
   '/wiki': 'wiki',
   '/code': 'code',
-  '/skills': 'skills',
-  '/memory': 'chat_memory',
   '/team/members': 'team_members',
   '/team/agents': 'team_agents',
   '/team/api-keys': 'api_keys',
@@ -39,8 +37,6 @@ function legacyHashToPath(): string | null {
   if (!leaf) return null;
   if (leaf === 'wiki') return '/wiki';
   if (leaf === 'code') return '/code';
-  if (leaf === 'skills' || leaf === 'skill') return '/skills';
-  if (leaf === 'chat_memory' || leaf === 'memory' || leaf === 'chat-memory') return '/memory';
   if (leaf === 'agents' || leaf === 'team_agents') return '/team/agents';
   if (leaf === 'team' || leaf === 'members' || leaf === 'team_members') return '/team/members';
   if (leaf === 'api_keys' || leaf === 'apikey' || leaf === 'api-keys') return '/team/api-keys';
@@ -59,7 +55,7 @@ export function ConsoleLayout() {
     const match = Object.entries(PATH_TO_PAGE).find(
       ([path]) => path !== '/' && location.pathname.startsWith(path),
     );
-    return match ? match[1] : 'workbench_board';
+    return match ? match[1] : 'wiki';
   }, [location.pathname]);
 
   useEffect(() => {
@@ -140,10 +136,6 @@ export function ConsoleLayout() {
       }));
   }, [userRole, PAGE_META, t]);
 
-  const workbenchGroupTitle = t('menu.group.workbench');
-  const pinnedGroup = menuGroups.find((g) => g.title === workbenchGroupTitle);
-  const restGroups = menuGroups.filter((g) => g.title !== workbenchGroupTitle);
-
   const renderMenuItem = (item: (typeof PAGE_META)[PageId]) => {
     const isActive = activePage === item.id;
     return (
@@ -178,8 +170,7 @@ export function ConsoleLayout() {
           <Sider>
             {/* 品牌已在全局 Header 展示，侧栏只承载导航（与 Memory项目公共壳层一致）。 */}
             <Menu collapsable collapsed={sidebarCollapsed} onCollapsedChange={setSidebarCollapsed}>
-              {pinnedGroup?.items.map((item) => renderMenuItem(item))}
-              {restGroups.map((group) => (
+              {menuGroups.map((group) => (
                 <Menu.Group key={group.title} title={group.title}>
                   {group.items.map((item) => renderMenuItem(item))}
                 </Menu.Group>

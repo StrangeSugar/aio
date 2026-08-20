@@ -399,6 +399,12 @@ export const zhCN = {
     '请输入合法的 HTTPS Git 仓库地址，且必须以 .git 结尾（如 https://gitlab.example.com/namespace/repo.git），不能含空格。',
   'code.register.submitting': '注册中…',
   'code.register.submit': '注册',
+  'code.register.username': '用户名（私有仓库）',
+  'code.register.usernameExtra': '私有仓库需要鉴权时填写',
+  'code.register.usernamePlaceholder': '请输入 Git 用户名',
+  'code.register.password': '密码/Token（私有仓库）',
+  'code.register.passwordExtra': '私有仓库需要鉴权时填写，建议使用 Access Token',
+  'code.register.passwordPlaceholder': '请输入密码或 Access Token',
   'code.confirm.delete': '确定要删除仓库「{{name}} ({{branch}})」吗？',
   'code.confirm.unbind': '确认解绑该代码图谱？',
   'code.confirm.unbind.desc': '将从当前 agent 移除该代码图谱绑定。',
@@ -1002,6 +1008,19 @@ export const zhCN = {
   'apiKey.endpoint.current': '当前实例：',
   'apiKey.endpoint.loading': '正在加载接入地址…',
   'apiKey.endpoint.copy': '复制',
+  // ===== MCP 接入 =====
+  'apiKey.mcp.title': 'MCP 接入',
+  'apiKey.mcp.current': '当前实例：',
+  'apiKey.mcp.loading': '正在加载接入信息…',
+  'apiKey.mcp.copy': '复制',
+  'apiKey.mcp.copyConfig': '复制配置',
+  'apiKey.mcp.desc':
+    '通过 MCP (Model Context Protocol) 将 Knowledge Service 的知识查询工具暴露给 LLM agent。' +
+    '在你的客户端（Claude Code / Cursor / VS Code 等）中添加以下配置即可使用。' +
+    'TDAI_TEAM_ID 指定团队隔离，TDAI_AGENT_ID 可选（限制只访问该 agent 挂载的知识）。',
+  'apiKey.mcp.configLabel': '客户端配置（mcpServers）',
+  'apiKey.mcp.envLabel': '环境变量说明',
+  'apiKey.mcp.clientsLabel': '支持的客户端',
   'apiKey.create.caption': '新建 User_Key',
   'apiKey.create.expiresAt': '过期时间',
   'apiKey.create.expiresAt.extra': '留空表示永不过期',

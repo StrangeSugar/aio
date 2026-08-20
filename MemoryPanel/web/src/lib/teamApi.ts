@@ -8,11 +8,10 @@
  *   - api/auth.ts          登录验活 + 环境绑定
  *   - api/teams.ts         Team + Member
  *   - api/agents.ts        Agent
- *   - api/tasks.ts         Task + ParticipationLog
  *   - api/users.ts         User + UserKey + UserConfig
  *   - api/assets.ts        Asset
- *   - api/skills.ts        Skill 数据面
- *   - api/chat-memory.ts   Chat Memory
+ *
+ * 注意：已移除 skills 和 chat-memory API（不再使用 skill 和记忆模块）。
  *
  * 外部消费方继续 `import { xxx } from '@/lib/teamApi'` 即可，无需改路径。
  * 新代码建议直接从 `@/lib/api/xxx` 导入，按需引用，减少打包体积。
@@ -33,18 +32,6 @@ export { teamsApi, membersApi } from './api/teams';
 // ── Agents ──
 export { agentsApi } from './api/agents';
 
-// ── Tasks + Participation Logs ──
-export {
-  tasksApi,
-  participationLogsApi,
-  type TaskStatus,
-  type TaskSourceType,
-  type BackendTask,
-  type BackendTaskAgent,
-  type BackendTaskWithAgents,
-  type ParticipationLogEntity,
-} from './api/tasks';
-
 // ── Users + UserKeys + UserConfig ──
 export {
   usersApi,
@@ -60,24 +47,6 @@ export {
 
 // ── Assets ──
 export { assetsApi } from './api/assets';
-
-// ── Skills ──
-export {
-  skillApi,
-  type SkillSummary,
-  type SkillManifestEntry,
-  type SkillDetail,
-  type SkillResourcePayload,
-  type SkillFileContent,
-} from './api/skills';
-
-// ── Chat Memory ──
-export {
-  chatMemoryApi,
-  type ChatMemoryBlock,
-  type ChatMemoryLayerItem,
-  type ChatMemorySearchHit,
-} from './api/chat-memory';
 
 // ── 共享类型（从 types.ts 透传） ──
 export type {

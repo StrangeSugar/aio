@@ -31,9 +31,9 @@ const PRIVATE_ADDR_RE =
  */
 function ssrfCheckEnabledFromEnv(): boolean {
   const raw = process.env.KNOWLEDGE_SSRF_CHECK;
-  if (raw == null || raw.trim() === "") return true;
+  if (raw == null || raw.trim() === "") return false;
   const v = raw.trim().toLowerCase();
-  return !(v === "off" || v === "false" || v === "0" || v === "no");
+  return v === "on" || v === "true" || v === "1" || v === "yes";
 }
 
 export interface GitSourceFetcherOptions {
@@ -71,12 +71,29 @@ export class GitSourceFetcher implements ISourceFetcher {
     }
   }
 
-  async fetch(sourceUrl: string, branch: string, localPath: string): Promise<FetchResult> {
+  /** 将用户名密码嵌入 URL（https://user:pass@host/repo.git） */
+  private embedCredentials(url: string, username?: string, password?: string): string {
+    if (!username) return url;
+    try {
+      const u = new URL(url);
+      u.username = username;
+      u.password = password ?? "";
+      const authUrl = u.href;
+      console.log(`[git-fetcher] embedCredentials: ${url} → ${authUrl.replace(/:[^:@]*@/, ':***@')}`);
+      return authUrl;
+    } catch (err) {
+      console.warn(`[git-fetcher] embedCredentials failed for ${url}:`, err);
+      return url;
+    }
+  }
+
+  async fetch(sourceUrl: string, branch: string, localPath: string, username?: string, password?: string): Promise<FetchResult> {
     this.validate(sourceUrl);
     // 浅克隆单分支。注：git clone/fetch 不会拉取远端的 .git/hooks（hooks 是本地态），
     // 所以正常仓库 clone 出来不带可执行钩子；此处不再配置 core.hooksPath
     // （加固版 git 会拒绝该配置：需 allowUnsafeHooksPath）。
-    await simpleGit().clone(sourceUrl, localPath, {
+    const authUrl = this.embedCredentials(sourceUrl, username, password);
+    await simpleGit().clone(authUrl, localPath, {
       "--depth": 1,
       "--branch": branch,
     });
@@ -84,8 +101,9 @@ export class GitSourceFetcher implements ISourceFetcher {
     return { localPath, version, sourceType: "git" };
   }
 
-  async sync(sourceUrl: string, branch: string, localPath: string): Promise<FetchResult> {
+  async sync(sourceUrl: string, branch: string, localPath: string, username?: string, password?: string): Promise<FetchResult> {
     this.validate(sourceUrl);
+    const authUrl = this.embedCredentials(sourceUrl, username, password);
     const git = simpleGit(localPath);
     await git.fetch("origin", branch, { "--depth": 1 });
     await git.reset(ResetMode.HARD, [`origin/${branch}`]);

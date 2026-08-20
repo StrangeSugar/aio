@@ -3,14 +3,14 @@
  *
  * 使用 react-router 的 createBrowserRouter / RouterProvider。
  * ConsoleLayout 作为父路由，各页面作为子路由。
+ *
+ * 注意：已移除 skills、memory、task 路由（不再使用 skill、记忆、任务模块）。
+ * 仅保留 wiki（文档）和 code（代码库）能力。
  */
 import { createHashRouter, type RouteObject } from 'react-router-dom';
 import { ConsoleLayout } from '@/layouts/ConsoleLayout';
-import { WorkbenchPage } from '@/pages/workbench/WorkbenchPage';
 import { WikiPage } from '@/pages/wiki/WikiPage';
 import { CodePage } from '@/pages/code/CodePage';
-import { SkillsPage } from '@/pages/skills/SkillsPage';
-import { ChatMemoryPage } from '@/pages/memory/ChatMemoryPage';
 import { MembersPage } from '@/pages/team/MembersPage';
 import { AgentsPage } from '@/pages/team/AgentsPage';
 import { ApiKeysPage } from '@/pages/team/ApiKeysPage';
@@ -20,11 +20,9 @@ export const routes: RouteObject[] = [
     path: '/',
     element: <ConsoleLayout />,
     children: [
-      { index: true, element: <WorkbenchPage /> },
+      { index: true, element: <WikiPage /> },
       { path: 'wiki', element: <WikiPage /> },
       { path: 'code', element: <CodePage /> },
-      { path: 'skills', element: <SkillsPage /> },
-      { path: 'memory', element: <ChatMemoryPage /> },
       { path: 'team/members', element: <MembersPage /> },
       { path: 'team/agents', element: <AgentsPage /> },
       { path: 'team/api-keys', element: <ApiKeysPage /> },

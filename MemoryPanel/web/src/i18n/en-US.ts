@@ -413,6 +413,12 @@ export const enUS = {
     'Please enter a valid HTTPS Git repository URL ending with .git (e.g. https://gitlab.example.com/namespace/repo.git). No spaces allowed.',
   'code.register.submitting': 'Registering…',
   'code.register.submit': 'Register',
+  'code.register.username': 'Username (Private Repo)',
+  'code.register.usernameExtra': 'Required for private repo authentication',
+  'code.register.usernamePlaceholder': 'Enter Git username',
+  'code.register.password': 'Password/Token (Private Repo)',
+  'code.register.passwordExtra': 'Required for private repo auth,建议使用 Access Token',
+  'code.register.passwordPlaceholder': 'Enter password or Access Token',
   'code.confirm.delete': 'Are you sure you want to delete repo "{{name}} ({{branch}}"?',
   'code.confirm.unbind': 'Unbind this code graph?',
   'code.confirm.unbind.desc': 'This will remove the code graph binding from the current agent.',
@@ -1035,6 +1041,19 @@ export const enUS = {
   'apiKey.endpoint.current': 'Current instance: ',
   'apiKey.endpoint.loading': 'Loading access endpoint…',
   'apiKey.endpoint.copy': 'Copy',
+  // ===== MCP Access =====
+  'apiKey.mcp.title': 'MCP Access',
+  'apiKey.mcp.current': 'Current instance: ',
+  'apiKey.mcp.loading': 'Loading access info…',
+  'apiKey.mcp.copy': 'Copy',
+  'apiKey.mcp.copyConfig': 'Copy Config',
+  'apiKey.mcp.desc':
+    'Expose Knowledge Service knowledge query tools to LLM agents via MCP (Model Context Protocol). ' +
+    'Add the following config to your client (Claude Code / Cursor / VS Code, etc.) to get started. ' +
+    'TDAI_TEAM_ID scopes the team; TDAI_AGENT_ID is optional (restricts to knowledge bound to that agent).',
+  'apiKey.mcp.configLabel': 'Client Config (mcpServers)',
+  'apiKey.mcp.envLabel': 'Environment Variables',
+  'apiKey.mcp.clientsLabel': 'Supported Clients',
   'apiKey.create.caption': 'New User_Key',
   'apiKey.create.expiresAt': 'Expires At',
   'apiKey.create.expiresAt.extra': 'Leave empty for never expires',

@@ -95,6 +95,8 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
             repoName: input.repo_name ?? "",
             repoUrl: input.repo_url,
             branch: input.branch,
+            username: input.username ?? null,
+            password: input.password ?? null,
             ownerUserId: input.owner_user_id ?? null,
             userId: input.user_id ?? null,
             agentId: input.agent_id ?? null,
@@ -259,6 +261,34 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
     return this.getCodeGraphById(serviceId, codeGraphId);
   }
 
+  /** 绑定 code-graph 到 agent */
+  updateCodeGraphAgentId(serviceId: string, codeGraphId: string, agentId: string): void {
+    this.db
+      .update(knowledgeCodeGraph)
+      .set({ agentId, updatedAt: nowIso() })
+      .where(
+        and(
+          eq(knowledgeCodeGraph.codeGraphId, codeGraphId),
+          eq(knowledgeCodeGraph.serviceId, serviceId),
+        ),
+      )
+      .run();
+  }
+
+  /** 解绑 code-graph 从 agent */
+  unbindCodeGraph(serviceId: string, codeGraphId: string): void {
+    this.db
+      .update(knowledgeCodeGraph)
+      .set({ agentId: null, updatedAt: nowIso() })
+      .where(
+        and(
+          eq(knowledgeCodeGraph.codeGraphId, codeGraphId),
+          eq(knowledgeCodeGraph.serviceId, serviceId),
+        ),
+      )
+      .run();
+  }
+
   // ═══════════════════════ Wiki ═══════════════════════
 
   createWiki(input: CreateWikiInput): CreateResult<WikiRow> {
@@ -377,6 +407,28 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
     return rows.map((r) => this.mapWikiRow(r));
   }
 
+  /** 按 agent_id 查询绑定的 wiki 列表 */
+  listWikisByAgent(serviceId: string, agentId: string): WikiRow[] {
+    const rows = this.db
+      .select()
+      .from(knowledgeWiki)
+      .where(and(eq(knowledgeWiki.serviceId, serviceId), eq(knowledgeWiki.agentId, agentId)))
+      .orderBy(desc(knowledgeWiki.updatedAt))
+      .all();
+    return rows.map((r) => this.mapWikiRow(r));
+  }
+
+  /** 按 agent_id 绑定的 code-graph 列表 */
+  listCodeGraphsByAgent(serviceId: string, agentId: string): CodeGraphRow[] {
+    const rows = this.db
+      .select()
+      .from(knowledgeCodeGraph)
+      .where(and(eq(knowledgeCodeGraph.serviceId, serviceId), eq(knowledgeCodeGraph.agentId, agentId)))
+      .orderBy(desc(knowledgeCodeGraph.updatedAt))
+      .all();
+    return rows.map((r) => this.mapCgRow(r));
+  }
+
   countWikis(serviceId: string, teamId: string, opts?: CountOpts): number {
     const conditions: SQL[] = [
       eq(knowledgeWiki.serviceId, serviceId),
@@ -447,6 +499,34 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
       )
       .run();
     return this.getWikiById(serviceId, wikiId);
+  }
+
+  /** 绑定 wiki 到 agent */
+  updateWikiAgentId(serviceId: string, wikiId: string, agentId: string): void {
+    this.db
+      .update(knowledgeWiki)
+      .set({ agentId, updatedAt: nowIso() })
+      .where(
+        and(
+          eq(knowledgeWiki.wikiId, wikiId),
+          eq(knowledgeWiki.serviceId, serviceId),
+        ),
+      )
+      .run();
+  }
+
+  /** 解绑 wiki 从 agent */
+  unbindWiki(serviceId: string, wikiId: string): void {
+    this.db
+      .update(knowledgeWiki)
+      .set({ agentId: null, updatedAt: nowIso() })
+      .where(
+        and(
+          eq(knowledgeWiki.wikiId, wikiId),
+          eq(knowledgeWiki.serviceId, serviceId),
+        ),
+      )
+      .run();
   }
 
   // ═══════════════════════ Audit ═══════════════════════
@@ -601,6 +681,8 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
       repo_name: r.repoName,
       repo_url: r.repoUrl,
       branch: r.branch,
+      username: r.username ?? null,
+      password: r.password ?? null,
       commit_hash: r.commitHash,
       owner_user_id: r.ownerUserId,
       user_id: r.userId,

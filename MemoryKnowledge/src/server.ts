@@ -22,6 +22,8 @@ import { createDb } from "./db/client.js";
 import { createKnowledgeModule } from "./module.js";
 import { createWikiRoutes } from "./routes/wiki.js";
 import { createCodeGraphRoutes } from "./routes/code-graph.js";
+import { createAgentFixedRoutes } from "./routes/agent-fixed.js";
+import { createAssetsRoutes } from "./routes/assets.js";
 import { createToolsRoutes } from "./routes/tools.js";
 import { createHealthRoutes } from "./routes/health.js";
 import { createLlmBindingRoutes } from "./routes/llm-binding.js";
@@ -80,6 +82,18 @@ export function createApp() {
     wikiMgr: knowledgeModule.wikiMgr,
     cgService: knowledgeModule.cgService,
     instancePool: knowledgeModule.instancePool,
+  }));
+
+  // agent-fixed — 查询 Agent 绑定的知识资产
+  api.route("/", createAgentFixedRoutes({
+    wikiService: knowledgeModule.wikiService,
+    cgService: knowledgeModule.cgService,
+  }));
+
+  // assets — 列出团队下所有可用知识资产
+  api.route("/", createAssetsRoutes({
+    wikiService: knowledgeModule.wikiService,
+    cgService: knowledgeModule.cgService,
   }));
 
   // internal/* — control-plane endpoints (TMC / operator). Per-instance LLM routing.

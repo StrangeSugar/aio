@@ -279,17 +279,19 @@ export default function ApiKeyPanel() {
         />
       </Card>
 
-      {/* ===== 接入指引 ===== */}
+      {/* ===== MCP 接入指引 ===== */}
       {/*
-        instance-id 从当前登录态注入（auth.instance_id）—— 用户不用再手工替换
-        [instance-id] 占位符，也不用去别处找自己现在连的是哪个实例。
-        未登录理论上不会走到这个页（LoginGate 挡在外面），仍保留占位 fallback 兜底。
+        MCP (Model Context Protocol) 接入方式 —— 通过 stdio 传输协议将 Knowledge Service
+        的工具能力暴露给 LLM agent（Claude Code / Cursor / VS Code / Windsurf 等）。
+        客户端通过 npx 拉起 MCP 服务端进程，服务端以 stdio 与 agent 通信，
+        同时将工具调用转发到 Knowledge Service 的 HTTP API。
+        环境变量：TDAI_TEAM_ID（团队隔离）、TDAI_USER_KEY（认证）、TDAI_AGENT_ID（可选，按 agent 过滤）。
       */}
       <Card>
-        <Card.Body title={t('apiKey.endpoint.title')}>
+        <Card.Body title={t('apiKey.mcp.title')}>
           {auth?.instance_name && (
             <div style={{ marginBottom: 8, fontSize: 11, color: 'var(--tea-color-text-secondary)' }}>
-              {t('apiKey.endpoint.current')}
+              {t('apiKey.mcp.current')}
               <code>{auth.instance_name}</code>
               <span style={{ opacity: 0.6, marginLeft: 6 }}>({auth.instance_id})</span>
             </div>
@@ -300,56 +302,129 @@ export default function ApiKeyPanel() {
               if (!clientBaseUrl) {
                 return (
                   <Text theme="weak" style={{ fontSize: 11 }}>
-                    {t('apiKey.endpoint.loading')}
+                    {t('apiKey.mcp.loading')}
                   </Text>
                 );
               }
               // 去掉结尾斜杠，避免 base + /path 拼成双斜杠（! 绕过闭包窄化）
               const base = clientBaseUrl!.replace(/\/+$/, '');
               const iid = auth?.instance_id ?? '[instance-id]';
-              const endpoints: Array<{ label: string; url: string }> = [
-                { label: 'CodeBuddy', url: `${base}/codebuddy/${iid}` },
-                { label: 'Claude Code', url: `${base}/claude-code/${iid}` },
-                // WorkBuddy 走 /workbuddy/<spaceId>（spaceId=instance_id，与 codebuddy 对称）。
-                // 网页版底层 OpenAI ChatCompletions、桌面版 Responses API，proxy 均已适配。
-                { label: 'WorkBuddy', url: `${base}/workbuddy/${iid}` },
-                // codex 用 OpenAI Responses API（POST /v1/responses）；proxy 侧
-                // 同时注册了 v1/无v1 两种路径，惯例用不带 /v1 的 base，客户端
-                // config.toml 里 base_url 直接填这个地址即可，wire_api="responses"。
-                { label: 'Codex', url: `${base}/codex/${iid}` },
-                // dsh (deepseek-harness) — DeepSeek 官方 agent harness,Web UI 会话
-                // 走 OpenAI Chat Completions。**尾巴不带 /v1** —— dsh 客户端
-                // hardcoded 拼 ${baseURL}/chat/completions,与 CB 同族;proxy 侧
-                // 路由 /dsh/{spaceId}/chat/completions 已对齐。用户填的 baseURL
-                // 直接是这里的地址,不要在后面再加 /v1。
-                { label: 'DeepSeek Harness (dsh)', url: `${base}/dsh/${iid}` },
-                { label: 'OpenClaw', url: `${base}/openclaw/default` },
-                { label: 'Hermes', url: `${base}/hermes/default` },
+              // MCP 配置：客户端通过 npx 拉起 MCP 服务端，环境变量注入连接信息
+              const mcpConfig = JSON.stringify(
+                {
+                  mcpServers: {
+                    'tdai-knowledge': {
+                      command: 'npx',
+                      args: ['-y', '@tdai/memory-hub-mcp'],
+                      env: {
+                        KNOWLEDGE_API_URL: base,
+                        TDAI_TEAM_ID: iid,
+                        TDAI_USER_KEY: '<your-user-key>',
+                        TDAI_AGENT_ID: '<your-agent-id>',
+                      },
+                    },
+                  },
+                },
+                null,
+                2,
+              );
+              const envLines = [
+                `KNOWLEDGE_API_URL=${base}`,
+                `TDAI_TEAM_ID=${iid}`,
+                `TDAI_USER_KEY=<your-user-key>`,
+                `TDAI_AGENT_ID=<your-agent-id> (可选)`,
               ];
-              return endpoints.map((ep) => (
-                <div className="_memory-apikey-endpoint" key={ep.label}>
-                  <Text theme="label" parent="div" style={{ marginBottom: 4 }}>
-                    {ep.label}
+              return (
+                <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* 简介 */}
+                  <Text theme="text" parent="div" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                    {t('apiKey.mcp.desc')}
                   </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code
+
+                  {/* Claude Code / Cursor 等客户端配置 */}
+                  <div>
+                    <Text theme="label" parent="div" style={{ marginBottom: 4, fontSize: 11 }}>
+                      {t('apiKey.mcp.configLabel')}
+                    </Text>
+                    <div style={{ position: 'relative' }}>
+                      <pre
+                        style={{
+                          margin: 0,
+                          padding: '8px 12px',
+                          background: 'var(--tea-color-bg-secondary-default)',
+                          border: '1px solid var(--tea-color-border-primary-default)',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontFamily: 'var(--font-mono)',
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                          maxHeight: 200,
+                          overflow: 'auto',
+                        }}
+                      >
+                        {mcpConfig}
+                      </pre>
+                      <div style={{ position: 'absolute', top: 6, right: 6 }}>
+                        <Copy text={mcpConfig}>
+                          <Button>{t('apiKey.mcp.copyConfig')}</Button>
+                        </Copy>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 环境变量说明 */}
+                  <div>
+                    <Text theme="label" parent="div" style={{ marginBottom: 4, fontSize: 11 }}>
+                      {t('apiKey.mcp.envLabel')}
+                    </Text>
+                    <div
                       style={{
-                        flex: 1,
-                        fontSize: 11,
-                        wordBreak: 'break-all',
+                        padding: '8px 12px',
                         background: 'var(--tea-color-bg-secondary-default)',
-                        padding: '4px 8px',
+                        border: '1px solid var(--tea-color-border-primary-default)',
                         borderRadius: 4,
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 11,
+                        lineHeight: 1.8,
                       }}
                     >
-                      {ep.url}
-                    </code>
-                    <Copy text={ep.url}>
-                      <Button>{t('apiKey.endpoint.copy')}</Button>
-                    </Copy>
+                      {envLines.map((line, idx) => (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <code style={{ flex: 1, wordBreak: 'break-all' }}>{line}</code>
+                          <Copy text={line}>
+                            <Button>{t('apiKey.mcp.copy')}</Button>
+                          </Copy>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 支持的客户端列表 */}
+                  <div>
+                    <Text theme="label" parent="div" style={{ marginBottom: 4, fontSize: 11 }}>
+                      {t('apiKey.mcp.clientsLabel')}
+                    </Text>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {['Claude Code', 'Cursor', 'VS Code (Copilot)', 'Windsurf', 'Continue.dev'].map((name) => (
+                        <span
+                          key={name}
+                          style={{
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            background: 'var(--tea-color-bg-secondary-default)',
+                            border: '1px solid var(--tea-color-border-primary-default)',
+                            borderRadius: 10,
+                            color: 'var(--tea-color-text-secondary)',
+                          }}
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ));
+              );
             })()}
           </div>
         </Card.Body>

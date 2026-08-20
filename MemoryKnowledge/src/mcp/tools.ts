@@ -23,6 +23,30 @@ export interface McpToolDef {
 }
 
 export const MCP_TOOLS: McpToolDef[] = [
+  // ── Asset Discovery (1) ──
+
+  {
+    name: "list_assets",
+    description:
+      "List all available knowledge assets (wikis and code graphs) for the current team. " +
+      "Returns IDs, names, and types. " +
+      "IMPORTANT: Call this FIRST to discover available wiki_id / code_graph_id values, " +
+      "then use those IDs in subsequent tool calls (wiki_search, code_search, etc.).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["wiki", "code_graph", "all"],
+          description: "Filter by asset type. Default: all.",
+        },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Max results (default: 20)" },
+      },
+      required: [],
+    },
+    endpoint: "/assets/list",
+  },
+
   // ── Code-Graph (8) ──
 
   {

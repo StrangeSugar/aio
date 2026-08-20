@@ -431,9 +431,9 @@ export const knowledgeApi = {
   // ---- Code-Graph ----
 
   code: {
-    /** 创建（注册仓库） */
-    create: (teamId: string, repoUrl: string, branch?: string, repoName?: string): Promise<CodeGraphDetail> =>
-      panelPost('/code-graph/create', { team_id: teamId, repo_url: repoUrl, branch: branch ?? 'main', repo_name: repoName }),
+    /** 创建（注册仓库）。username/password 用于私有仓库鉴权。 */
+    create: (teamId: string, repoUrl: string, branch?: string, repoName?: string, username?: string, password?: string): Promise<CodeGraphDetail> =>
+      panelPost('/code-graph/create', { team_id: teamId, repo_url: repoUrl, branch: branch ?? 'main', repo_name: repoName, ...(username && { username }), ...(password && { password }) }),
 
     /** @deprecated 使用 teamAssets */
     list: async (teamId: string): Promise<CodeGraphDetail[]> => {

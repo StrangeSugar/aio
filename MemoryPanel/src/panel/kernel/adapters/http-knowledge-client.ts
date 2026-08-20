@@ -187,4 +187,32 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
   async codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult> {
     return this.post(`/v3/code-graph/${tool}`, { code_graph_id: codeGraphId, ...params });
   }
+
+  // ═══════════════ Agent-Fixed ═══════════════
+
+  async agentFixed(agentId: string): Promise<Array<{ knowledge_id: string; asset_type: string; name: string; description: string | null; status: string; visibility: string; agent_id: string; team_id: string; owner_user_id: string; internal_status: string | null; created_at: string; updated_at: string }>> {
+    return this.post('/v3/agent-fixed', { agent_id: agentId });
+  }
+
+  // ═══════════════ Allocate（绑定 Agent）═══════════════
+
+  /** 绑定 Wiki 到 Agent */
+  async wikiAllocate(teamId: string, wikiId: string, agentId: string): Promise<void> {
+    await this.post('/v3/wiki/allocate', { team_id: teamId, wiki_id: wikiId, agent_id: agentId });
+  }
+
+  /** 绑定 CodeGraph 到 Agent */
+  async codeGraphAllocate(teamId: string, codeGraphId: string, agentId: string): Promise<void> {
+    await this.post('/v3/code-graph/allocate', { team_id: teamId, code_graph_id: codeGraphId, agent_id: agentId });
+  }
+
+  /** 解绑 Wiki 从 Agent */
+  async wikiUnbind(wikiId: string): Promise<void> {
+    await this.post('/v3/wiki/unbind', { wiki_id: wikiId });
+  }
+
+  /** 解绑 CodeGraph 从 Agent */
+  async codeGraphUnbind(codeGraphId: string): Promise<void> {
+    await this.post('/v3/code-graph/unbind', { code_graph_id: codeGraphId });
+  }
 }

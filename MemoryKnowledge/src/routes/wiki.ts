@@ -150,6 +150,34 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
     return c.json(wrapOk(toWikiDetail(updated)));
   });
 
+  app.post("/allocate", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = c.req.header("x-tdai-service-id");
+    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const wikiId = typeof body.wiki_id === "string" ? body.wiki_id : "";
+    if (!isValidIdSegment(wikiId)) return c.json(wrapError(400, "wiki_id is required"), 400);
+    const agentId = typeof body.agent_id === "string" ? body.agent_id : "";
+    if (!agentId) return c.json(wrapError(400, "agent_id is required"), 400);
+
+    const row = wikiService.getById(serviceId, wikiId);
+    if (!row) return c.json(wrapError(404, "wiki not found"), 404);
+    wikiService.allocate(serviceId, wikiId, agentId);
+    return c.json(wrapOk({ ok: true }));
+  });
+
+  app.post("/unbind", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = c.req.header("x-tdai-service-id");
+    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const wikiId = typeof body.wiki_id === "string" ? body.wiki_id : "";
+    if (!isValidIdSegment(wikiId)) return c.json(wrapError(400, "wiki_id is required"), 400);
+
+    const row = wikiService.getById(serviceId, wikiId);
+    if (!row) return c.json(wrapError(404, "wiki not found"), 404);
+    wikiService.unbind(serviceId, wikiId);
+    return c.json(wrapOk({ ok: true }));
+  });
+
   // ── WITH-IdFields (service_id + team_id) ──
 
   app.post("/create", async (c) => {

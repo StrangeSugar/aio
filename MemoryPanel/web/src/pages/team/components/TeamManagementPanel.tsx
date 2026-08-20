@@ -33,15 +33,15 @@ import {
   writeAgentUiMeta,
   type Agent as StoreAgent,
 } from '@/services';
-import { teamsApi, agentsApi, skillApi } from '@/lib/teamApi';
+import { teamsApi, agentsApi } from '@/lib/teamApi';
 import { knowledgeApi } from '@/lib/knowledge-api';
 import { useDisplayNameResolver } from '@/services/user-profile-store';
 import { tea } from '@/lib/tea-bridge';
 import { getErrorMessage } from '@/lib/error-message';
 import './team-management-panel.css';
 
-import { MAX_IMPORTED_CHAT_MEMORIES, importedChatMemoryIds, type AgentCard } from './types';
-import { useAgentMountedCounts, syncChatMemoryBindings } from './useAgentAssets';
+import { type AgentCard } from './types';
+import { useAgentMountedCounts } from './useAgentAssets';
 import AgentGrid from './AgentGrid';
 import { TeamHeaderCard } from './TeamHeaderCard';
 import { MemberSection, AddMemberDialog, CreatedUserKeyModal } from './MemberSection';
@@ -103,13 +103,6 @@ export default function TeamManagementPanel({
 
   async function handleCreateAgent(card: Omit<AgentCard, 'id' | 'icon' | 'accent'>) {
     if (!activeTeamId || !activeTeam) return;
-    if (
-      importedChatMemoryIds(activeTeamId, '__new_agent__', card.chatMemories).length >
-      MAX_IMPORTED_CHAT_MEMORIES
-    ) {
-      tea.notify.error('IMPORT_LIMIT_EXCEEDED');
-      return;
-    }
     const accents: AgentCard['accent'][] = ['blue', 'purple', 'orange', 'emerald', 'rose', 'slate'];
     const icons = ['🤖', '✨', '⚡', '🎯', '🚀', '🧩'];
     const accent = accents[agents.length % accents.length];
@@ -132,13 +125,7 @@ export default function TeamManagementPanel({
 
       // 资产绑定统一走真实挂载接口（不写 metadata_json.ui）。串行执行，任一失败即抛错，
       // 由外层 catch 统一提示 —— 避免 allSettled 静默导致「显示绑了但实际没绑」。
-      //   - skill → forkToAgent（复制 owner=新 agent 的独立副本）
       //   - code_graph / wiki → allocate（引用绑定）
-      //   - chat_memory → syncChatMemoryBindings
-      await syncChatMemoryBindings(activeTeamId, created.agent_id, card.chatMemories);
-      for (const skillId of card.skills) {
-        await skillApi.forkToAgent(activeTeamId, skillId, created.agent_id);
-      }
       for (const id of card.codeGraphs) {
         await knowledgeApi.code.allocate(activeTeamId, id, created.agent_id);
       }
@@ -181,16 +168,7 @@ export default function TeamManagementPanel({
       await agentsApi.delete(agent.agent_id);
       invalidateBackendCache();
     } catch (err) {
-      // SKILL_DELETE_FAILED：控制台层已删了一部分 skill 但被中断，agent 未 archive
-      // —— 明确告诉用户去 skill 面板处理后重试，别只给一句技术错误码
-      const raw = err instanceof Error ? err.message : String(err);
-      if (raw.includes('SKILL_DELETE_FAILED')) {
-        tea.notify.error(
-          t('team.deleteAgent.skillFailed', { name: agent.name, raw }),
-        );
-      } else {
-        tea.notify.error(errMsg(err));
-      }
+      tea.notify.error(errMsg(err));
     }
   }
 

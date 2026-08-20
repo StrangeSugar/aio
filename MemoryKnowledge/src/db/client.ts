@@ -156,6 +156,8 @@ export function migrate(_db: Db, raw: Database.Database): void {
   // so we check PRAGMA table_info first.
   addColumnIfMissing(raw, "knowledge_code_graph", "service_url", "TEXT");
   addColumnIfMissing(raw, "knowledge_code_graph", "summary", "TEXT");
+  addColumnIfMissing(raw, "knowledge_code_graph", "username", "TEXT");
+  addColumnIfMissing(raw, "knowledge_code_graph", "password", "TEXT");
   addColumnIfMissing(raw, "knowledge_wiki", "service_url", "TEXT");
   addColumnIfMissing(raw, "knowledge_wiki", "summary", "TEXT");
   // service_id on audit tables is nullable → safe to add to existing dev DBs.

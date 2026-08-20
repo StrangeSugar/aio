@@ -29,6 +29,8 @@ export function useCodeSources() {
   const [showRegister, setShowRegister] = useState(false);
   const [formRepo, setFormRepo] = useState('');
   const [formBranch, setFormBranch] = useState('main');
+  const [formUsername, setFormUsername] = useState('');
+  const [formPassword, setFormPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Allocate-to-agent dialog state
@@ -279,10 +281,19 @@ export function useCodeSources() {
     }
     setSubmitting(true);
     try {
-      const detail = await knowledgeApi.code.create(activeTeamId, repo, formBranch.trim(), repo);
+      const detail = await knowledgeApi.code.create(
+        activeTeamId,
+        repo,
+        formBranch.trim(),
+        repo,
+        formUsername.trim() || undefined,
+        formPassword.trim() || undefined,
+      );
       setShowRegister(false);
       setFormRepo('');
       setFormBranch('main');
+      setFormUsername('');
+      setFormPassword('');
       setScopeTab('team');
       setInFlight((prev) => [
         ...prev.filter((x) => x.code_graph_id !== detail.code_graph_id),
@@ -405,6 +416,10 @@ export function useCodeSources() {
     setFormRepo,
     formBranch,
     setFormBranch,
+    formUsername,
+    setFormUsername,
+    formPassword,
+    setFormPassword,
     submitting,
     setSubmitting,
     // allocate

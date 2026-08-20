@@ -186,4 +186,15 @@ export interface KnowledgeClientPort {
   codeGraphDelete(codeGraphIds: string[]): Promise<BatchDeleteResult>;
   codeGraphUpdateMeta(codeGraphId: string, patch: { repo_name?: string; summary?: string | null }): Promise<CodeGraphDetail>;
   codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult>;
+
+  // Agent-Fixed — 查询 Agent 绑定的知识资产
+  agentFixed(agentId: string): Promise<Array<{ knowledge_id: string; asset_type: string; name: string; description: string | null; status: string; visibility: string; agent_id: string; team_id: string; owner_user_id: string; internal_status: string | null; created_at: string; updated_at: string }>>;
+
+  // Allocate — 绑定资产到 Agent
+  wikiAllocate(teamId: string, wikiId: string, agentId: string): Promise<void>;
+  codeGraphAllocate(teamId: string, codeGraphId: string, agentId: string): Promise<void>;
+
+  // Unbind — 解绑资产从 Agent
+  wikiUnbind(wikiId: string): Promise<void>;
+  codeGraphUnbind(codeGraphId: string): Promise<void>;
 }

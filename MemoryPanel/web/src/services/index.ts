@@ -2,7 +2,7 @@
  * services/index.ts — 领域服务门面
  *
  * 组件统一从 @/services 导入。
- * Team / Agent / Task 已切换到后端链路 A（services/backendStore.ts，
+ * Team / Agent 已切换到后端链路 A（services/backendStore.ts，
  * 内部调用 @/lib/teamApi 的 meta 接口）；
  * 其余（accounts / user profile / api key / asset scope / user asset / agent template）
  * 后端暂无对应能力，仍走本地 localStorage 演示层（按职责拆分到独立文件），后续逐个替换。
@@ -12,9 +12,6 @@
 export type {
   TeamMember,
   Team,
-  Task,
-  TaskStatus,
-  TaskSourceType,
   Agent,
 } from './backendStore';
 export type { AgentTemplate } from './agent-template-store';
@@ -22,28 +19,21 @@ export type { AssetKind, AssetConfigScope, AssetScopeRecord } from './asset-scop
 export type { UserAssetKind, UserAsset } from './user-asset-store';
 export type { MockAccount } from './account-store';
 
-// ===== Team / Agent / Task service（链路 A，后端持久化）=====
+// ===== Team / Agent service（链路 A，后端持久化）=====
 export {
   readActiveTeamId,
   writeActiveTeamId,
   useTeams,
   useAgents,
-  useTasks,
   readActiveTeamAgents,
   isTeamAdmin,
   isTeamMember,
   roleInTeam,
   canManageAsset,
-  canEditTask,
-  canDeleteTask,
   invalidateBackendCache,
   clearBackendCache,
   invalidateTeamCache,
   writeAgentUiMeta,
-  createTaskAsync as createTask,
-  deleteTaskAsync as deleteTask,
-  updateTaskAsync as updateTask,
-  updateTaskStatusAsync as updateTaskStatus,
 } from './backendStore';
 
 // ===== Agent template service =====

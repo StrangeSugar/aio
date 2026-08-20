@@ -1,31 +1,26 @@
 /**
- * backendStore.ts — Team / Agent / Task 的后端数据层（链路 A）。
+ * backendStore.ts — Team / Agent 的后端数据层（链路 A）。
  *
- * 取代原来 demoStore.ts 里 team/agent/task 相关的 localStorage 实现：
+ * 取代原来 demoStore.ts 里 team/agent 相关的 localStorage 实现：
  *   - Team    走 teamApi.teamsApi + teamApi.membersApi
  *   - Agent   走 teamApi.agentsApi
- *   - Task    走 teamApi.tasksApi
  *
- * 后端 schema 里没有的 UI 专属字段（icon / accent / role_prompt / rules_prompt /
- * skills / code_graphs / llm_wikis / chat_memories / task.participants 等）
- * 统一序列化进 agent.metadata_json / task.metadata_json 的 "ui" namespace，
+ * 后端 schema 里没有的 UI 专属字段（icon / accent / role_prompt / rules_prompt）
+ * 统一序列化进 agent.metadata_json 的 "ui" namespace，
  * 保证刷新页面后这些字段不丢 —— 等对应的资产/字段在后端落地后，把
- * readXxxUiMeta / writeXxxUiMeta 里的读写目标换成真字段即可，组件层不用改。
+ * readAgentUiMeta / writeAgentUiMeta 里的读写目标换成真字段即可，组件层不用改。
  *
  * 缓存策略：
  *   - 模块级缓存 + in-flight promise 去重：同一时刻多个 useTeams()/useAgents() 只发一次请求；
  *   - invalidateBackendCache()：所有写操作后调用，清缓存并广播 BACKEND_REFRESH_EVENT；
- *   - useTeams/useAgents/useTasks 监听该事件自动重新拉取。
+ *   - useTeams/useAgents 监听该事件自动重新拉取。
  */
 
 import {
-  tasksApi,
   type Team as BackendTeam,
   type Agent as BackendAgent,
   type TeamMember as BackendMember,
-  type BackendTask,
 } from '@/lib/teamApi';
-import { invalidateBackendCache } from '@/stores/backend';
 
 // ========================= Types（前端展示形状，尽量贴近旧 demoStore，减少调用方改动） =========================
 
@@ -63,25 +58,6 @@ export interface Agent {
   metadata_json?: string;
   created_at_ms: number;
   updated_at_ms: number;
-}
-
-export type TaskStatus = 'running' | 'completed';
-export type TaskSourceType = 'manual' | 'tapd';
-
-export interface Task {
-  task_id: string;
-  team_id: string;
-  creator_user_id: string;
-  participants: string[];
-  title: string;
-  description: string;
-  source_type: TaskSourceType;
-  source_url: string;
-  linked_agents: string[];
-  status: TaskStatus;
-  created_at_ms: number;
-  updated_at_ms: number;
-  metadata_json?: string;
 }
 
 // ========================= metadata_json 兜底读写（"ui" namespace） =========================
@@ -144,40 +120,6 @@ export function writeAgentUiMeta(prevMetadataJson: string | undefined, patch: Pa
   return JSON.stringify(meta);
 }
 
-interface TaskUiMeta {
-  participants: string[];
-}
-
-function readTaskUiMeta(metadataJson: string | undefined, fallbackParticipant: string): TaskUiMeta {
-  const fallback: TaskUiMeta = { participants: fallbackParticipant ? [fallbackParticipant] : [] };
-  if (!metadataJson) return fallback;
-  try {
-    const meta = JSON.parse(metadataJson) as Record<string, unknown>;
-    const slot = meta?.ui as Partial<TaskUiMeta> | undefined;
-    if (slot && Array.isArray(slot.participants)) {
-      return { participants: Array.from(new Set([...(slot.participants as string[]), fallbackParticipant].filter(Boolean))) };
-    }
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeTaskUiMeta(prevMetadataJson: string | undefined, patch: Partial<TaskUiMeta>): string {
-  let meta: Record<string, unknown> = {};
-  if (prevMetadataJson) {
-    try {
-      const parsed = JSON.parse(prevMetadataJson);
-      if (parsed && typeof parsed === 'object') meta = parsed as Record<string, unknown>;
-    } catch {
-      /* ignore */
-    }
-  }
-  const prevUi = (meta.ui && typeof meta.ui === 'object' ? meta.ui : {}) as Partial<TaskUiMeta>;
-  meta.ui = { ...prevUi, ...patch };
-  return JSON.stringify(meta);
-}
-
 // ========================= Adapters（export 供 stores/backend.ts 使用） =========================
 
 export function adaptTeam(bt: BackendTeam, members: TeamMember[]): Team {
@@ -230,29 +172,6 @@ export function adaptAgent(ba: BackendAgent, index: number): Agent {
   };
 }
 
-function normalizeTaskStatus(backend: BackendTask['status']): TaskStatus {
-  return backend === 'completed' ? 'completed' : 'running';
-}
-
-export function adaptTask(bt: BackendTask, linkedAgents: string[]): Task {
-  const ui = readTaskUiMeta(bt.metadata_json, bt.creator_user_id);
-  return {
-    task_id: bt.task_id,
-    team_id: bt.team_id,
-    creator_user_id: bt.creator_user_id,
-    participants: ui.participants,
-    title: bt.title,
-    description: bt.description ?? '',
-    source_type: bt.source_type === 'tapd' ? 'tapd' : 'manual',
-    source_url: bt.source_url ?? '',
-    linked_agents: linkedAgents,
-    status: normalizeTaskStatus(bt.status),
-    created_at_ms: new Date(bt.created_at).getTime(),
-    updated_at_ms: new Date(bt.updated_at).getTime(),
-    metadata_json: bt.metadata_json,
-  };
-}
-
 // ========================= Active team id（客户端 UI 状态，localStorage 持久化） =========================
 
 const ACTIVE_TEAM_KEY = 'tdai-memory.activeTeam.v1';
@@ -284,7 +203,7 @@ export function ensureValidActiveTeamId(teams: Team[]): void {
 // ========================= Hooks & cache（已迁移到 stores/backend.ts） =========================
 //
 // 旧的模块级变量（_cachedTeams / _cachedAgentsMap / _inflightTeams …）已全部
-// 迁移到 zustand store（stores/backend.ts），通过 useTeams / useAgents / useTasks
+// 迁移到 zustand store（stores/backend.ts），通过 useTeams / useAgents
 // 从 store 读数据 + 触发 fetch，多个组件共享同一份状态，不再重复请求。
 //
 // invalidateBackendCache / clearBackendCache 也由新 store 提供，这里 re-export
@@ -293,7 +212,6 @@ export function ensureValidActiveTeamId(teams: Team[]): void {
 export {
   useTeams,
   useAgents,
-  useTasks,
   readActiveTeamAgents,
   invalidateBackendCache,
   clearBackendCache,
@@ -337,92 +255,4 @@ export function canManageAsset(
   return false;
 }
 
-export function canEditTask(task: Task, team: Team | null | undefined, userId: string): boolean {
-  if (!userId) return false;
-  if (!team || team.team_id !== task.team_id) return false;
-  return isTeamMember(team, userId);
-}
 
-export function canDeleteTask(task: Task, team: Team | null | undefined, userId: string): boolean {
-  return canManageAsset({ owner_user_id: task.creator_user_id, team_id: task.team_id }, team, userId);
-}
-
-// ========================= Task mutations（async，包一层 diff/参与者逻辑） =========================
-
-export async function createTaskAsync(input: {
-  team_id: string;
-  creator_user_id: string;
-  title: string;
-  description: string;
-  source_type: TaskSourceType;
-  source_url: string;
-  linked_agents: string[];
-}): Promise<Task> {
-  const created = await tasksApi.create(input.team_id, {
-    title: input.title,
-    description: input.description,
-    source_type: input.source_type,
-    source_url: input.source_url || undefined,
-    linked_agents: input.linked_agents.length > 0 ? input.linked_agents : undefined,
-  });
-  invalidateBackendCache();
-  return adaptTask(created, input.linked_agents);
-}
-
-export async function deleteTaskAsync(taskId: string): Promise<void> {
-  await tasksApi.delete(taskId);
-  invalidateBackendCache();
-}
-
-export async function updateTaskStatusAsync(taskId: string, status: TaskStatus, actorUserId?: string): Promise<void> {
-  const patch: Record<string, unknown> = { status };
-  if (actorUserId) {
-    // 参与者留痕：读一次当前 task 详情，把 actor 并入 participants 再写回 metadata_json
-    try {
-      const current = await tasksApi.get(taskId);
-      const ui = readTaskUiMeta(current.metadata_json, current.creator_user_id);
-      if (!ui.participants.includes(actorUserId)) {
-        patch.metadata_json = writeTaskUiMeta(current.metadata_json, {
-          participants: [...ui.participants, actorUserId],
-        });
-      }
-    } catch { /* 参与者留痕失败不阻断状态切换 */ }
-  }
-  await tasksApi.update(taskId, patch as Parameters<typeof tasksApi.update>[1]);
-  invalidateBackendCache();
-}
-
-export async function updateTaskAsync(
-  taskId: string,
-  patch: Partial<Pick<Task, 'title' | 'description' | 'source_type' | 'source_url' | 'linked_agents'>>,
-  actorUserId?: string
-): Promise<void> {
-  const current = await tasksApi.get(taskId);
-  const updatePayload: Record<string, unknown> = {};
-  if (patch.title !== undefined) updatePayload.title = patch.title;
-  if (patch.description !== undefined) updatePayload.description = patch.description;
-  if (patch.source_url !== undefined) updatePayload.source_url = patch.source_url;
-
-  const ui = readTaskUiMeta(current.metadata_json, current.creator_user_id);
-  const nextParticipants = actorUserId && !ui.participants.includes(actorUserId)
-    ? [...ui.participants, actorUserId]
-    : ui.participants;
-  if (nextParticipants !== ui.participants) {
-    updatePayload.metadata_json = writeTaskUiMeta(current.metadata_json, { participants: nextParticipants });
-  }
-  if (Object.keys(updatePayload).length > 0) {
-    await tasksApi.update(taskId, updatePayload as Parameters<typeof tasksApi.update>[1]);
-  }
-
-  if (patch.linked_agents) {
-    const before = new Set(current.agents.filter((a) => a.status === 'active').map((a) => a.agent_id));
-    const after = new Set(patch.linked_agents);
-    const toLink = [...after].filter((id) => !before.has(id));
-    const toUnlink = [...before].filter((id) => !after.has(id));
-    await Promise.all([
-      ...toLink.map((id) => tasksApi.linkAgent(taskId, id)),
-      ...toUnlink.map((id) => tasksApi.unlinkAgent(taskId, id)),
-    ]);
-  }
-  invalidateBackendCache();
-}

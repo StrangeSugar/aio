@@ -1,0 +1,155 @@
+# 开发模式 — 源码挂载 + 热更新，改代码无需重新构建镜像
+#
+# 用法：
+#   docker compose -f deploy/docker-compose.dev.yml up -d    # 启动
+#   docker compose -f deploy/docker-compose.dev.yml logs -f  # 看日志
+#   docker compose -f deploy/docker-compose.dev.yml down     # 停止
+#
+# 改前端代码 → Vite HMR 即时生效
+# 改后端代码 → tsx watch 自动重启
+# 改 Knowledge 代码 → 需要重打镜像（改动较少）
+
+services:
+  # ── MemoryCore 网关（生产镜像，不改代码）──
+  memory-core:
+    image: agentmemory/memory-core:latest
+    container_name: tdai-memory-core
+    ports:
+      - "8420:8420"
+    volumes:
+      - tdai-memory-core-data:/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8420/health"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+
+    networks:
+      - tdai-net
+
+  # ── MemoryProxy（生产镜像，不改代码）──
+  memory-proxy:
+    image: agentmemory/memory-proxy:latest
+    container_name: tdai-proxy
+    ports:
+      - "8096:8096"
+    volumes:
+      - tdai-proxy-data:/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8096/health"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+    networks:
+      - tdai-net
+
+  # ── Knowledge Service（生产镜像，不改代码）──
+  knowledge:
+    image: agentmemory/memory-hub:latest
+    container_name: tdai-knowledge-dev
+    command: >
+      sh -c "PORT=8424 node dist/server.mjs"
+    ports:
+      - "8424:8424"
+    volumes:
+      - tdai-knowledge-data:/data/knowledge
+    environment:
+      - NODE_ENV=production
+      - KNOWLEDGE_PORT=8424
+      - KNOWLEDGE_DATA_DIR=/data/knowledge
+      - KNOWLEDGE_DB_PATH=/data/knowledge/knowledge.db
+      - GIT_SSL_NO_VERIFY=1
+      # LLM 配置（wiki ingest 需要）— 填入你的 OpenAI 兼容端点
+      - LLM_MODE=custom
+      - LLM_PROTOCOL=openai
+      - LLM_PROVIDER=custom
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-32768}
+      - LLM_TIMEOUT_MS=${LLM_TIMEOUT_MS:-1200000}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8424/health"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+
+    networks:
+      - tdai-net
+
+  # ── Panel 后端（开发模式 — tsx watch 热更新）──
+  panel-backend:
+    image: node:22-slim
+    container_name: tdai-panel-backend-dev
+    working_dir: /app
+    command: >
+      sh -c "npm install --no-audit --no-fund && npm run dev"
+    ports:
+      - "8125:8125"
+    volumes:
+      # 源码挂载 — 改动即时生效
+      - ../MemoryPanel:/app
+      # node_modules 不挂载（容器内独立安装）
+      - panel-backend-modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=8125
+      - HOST=0.0.0.0
+      - METADATA_INSTANCES_CONFIG=./config/metadata-instances.json
+      - KNOWLEDGE_SERVICE_URL=http://knowledge:8424
+      - META_PROXY_URL=http://memory-proxy:8096
+      - METADATA_REMOTE_TIMEOUT_MS=15000
+      - LOG_LEVEL=debug
+      - LOG_FORMAT=pretty
+    restart: unless-stopped
+    depends_on:
+      - knowledge
+      - memory-proxy
+    networks:
+      - tdai-net
+
+  # ── Web 前端（开发模式 — Vite HMR）──
+  web-frontend:
+    image: node:22-slim
+    container_name: tdai-web-dev
+    working_dir: /app
+    command: >
+      sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../MemoryPanel/web:/app
+      - web-modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      # Vite dev server 代理 API 请求到 panel-backend
+      - VITE_TMC_BACKEND_URL=http://panel-backend:8125
+      - VITE_SKILL_GATEWAY_URL=http://knowledge:8424
+    restart: unless-stopped
+    depends_on:
+      - panel-backend
+    networks:
+      - tdai-net
+
+networks:
+  tdai-net:
+    name: tdai-memory-stack
+    external: true
+
+volumes:
+  tdai-memory-core-data:
+    name: tdai-memory-core-data
+    external: true
+  tdai-proxy-data:
+    name: tdai-proxy-data
+    external: true
+  tdai-knowledge-data:
+  panel-backend-modules:
+  web-modules:

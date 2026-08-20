@@ -34,6 +34,10 @@ export interface CodeGraphRow {
   repo_name: string;
   repo_url: string;
   branch: string;
+  /** 私有仓库鉴权用户名（可选） */
+  username?: string | null;
+  /** 私有仓库鉴权密码（可选） */
+  password?: string | null;
   commit_hash: string | null;
   owner_user_id: string | null;
   user_id: string | null;
@@ -59,6 +63,10 @@ export interface CreateCodeGraphInput {
   repo_url: string;
   branch: string;
   repo_name?: string;
+  /** 私有仓库鉴权用户名（可选） */
+  username?: string;
+  /** 私有仓库鉴权密码（可选） */
+  password?: string;
   owner_user_id?: string;
   user_id?: string;
   agent_id?: string;

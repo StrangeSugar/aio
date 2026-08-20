@@ -24,6 +24,10 @@ export const knowledgeCodeGraph = sqliteTable(
     repoName: text("repo_name").notNull().default(""),
     repoUrl: text("repo_url").notNull(),
     branch: text("branch").notNull(),
+    /** 私有仓库鉴权用户名（可选） */
+    username: text("username"),
+    /** 私有仓库鉴权密码（可选） */
+    password: text("password"),
     commitHash: text("commit_hash"),
     ownerUserId: text("owner_user_id"),
     userId: text("user_id"),
