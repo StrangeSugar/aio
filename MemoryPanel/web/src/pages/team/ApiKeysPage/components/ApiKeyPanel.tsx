@@ -38,6 +38,7 @@ import {
 import { AddIcon } from 'tea-icons-react';
 import { userKeysApi, metaInstancesApi, type UserKey } from '@/lib/teamApi';
 import { useCurrentRole } from '@/services/useCurrentRole';
+import { useTeams } from '@/services';
 import { useAuthStore } from '@/stores/auth';
 import { tea } from '@/lib/tea-bridge';
 import './api-key-panel.css';
@@ -47,6 +48,10 @@ const { autotip } = Table.addons;
 export default function ApiKeyPanel() {
   const { t } = useTranslation();
   const role = useCurrentRole();
+  // 当前团队（TeamSwitcher 选中的 activeTeamId）-- MCP 配置里 TDAI_TEAM_ID 的
+  // 正确取值：知识资产挂在 team-xxx 下，list_assets 按 team_id 过滤；
+  // instance_id（service 维度）只用于 TDAI_SERVICE_ID。
+  const { activeTeamId } = useTeams();
   const { auth } = useAuthStore();
   const [keys, setKeys] = useState<UserKey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -283,9 +288,12 @@ export default function ApiKeyPanel() {
       {/*
         MCP (Model Context Protocol) 接入方式 —— 通过 stdio 传输协议将 Knowledge Service
         的工具能力暴露给 LLM agent（Claude Code / Cursor / VS Code / Windsurf 等）。
-        客户端通过 npx 拉起 MCP 服务端进程，服务端以 stdio 与 agent 通信，
-        同时将工具调用转发到 Knowledge Service 的 HTTP API。
-        环境变量：TDAI_TEAM_ID（团队隔离）、TDAI_USER_KEY（认证）、TDAI_AGENT_ID（可选，按 agent 过滤）。
+        服务端是 nginx 托管的单文件（/mcp/server.mjs），用户先 curl 下载到本地，
+        再以 node 拉起进程；服务端以 stdio 与 agent 通信，同时把工具调用转发到
+        Knowledge Service 的 HTTP API（/v3）。
+        基址取当前页面 origin（nginx 同时代理 /v3/ 与 /mcp/）。
+        环境变量：TDAI_SERVICE_ID（实例隔离）、TDAI_TEAM_ID（团队隔离）、
+        TDAI_USER_KEY（认证）、TDAI_AGENT_ID（可选，按 agent 过滤）。
       */}
       <Card>
         <Card.Body title={t('apiKey.mcp.title')}>
@@ -298,27 +306,58 @@ export default function ApiKeyPanel() {
           )}
           <div className="_memory-apikey-endpoints">
             {(() => {
-              // base 未拉到就显示加载中；防止用户误抄硬编码 URL
-              if (!clientBaseUrl) {
+              // 基址取当前页面 origin（nginx 同时代理 /v3/ 与 /mcp/）；clientBaseUrl 兜底。
+              const originBase =
+                (typeof window !== 'undefined' ? window.location.origin : '') ||
+                clientBaseUrl ||
+                '';
+              // base 未就绪就显示加载中；防止用户误抄硬编码 URL
+              if (!originBase) {
                 return (
                   <Text theme="weak" style={{ fontSize: 11 }}>
                     {t('apiKey.mcp.loading')}
                   </Text>
                 );
               }
-              // 去掉结尾斜杠，避免 base + /path 拼成双斜杠（! 绕过闭包窄化）
-              const base = clientBaseUrl!.replace(/\/+$/, '');
+              // 去掉结尾斜杠，避免 base + /path 拼成双斜杠
+              const base = originBase.replace(/\/+$/, '');
               const iid = auth?.instance_id ?? '[instance-id]';
-              // MCP 配置：客户端通过 npx 拉起 MCP 服务端，环境变量注入连接信息
+              // TDAI_TEAM_ID 用当前团队（知识资产实际挂载的 team），不是 instance_id
+              const teamId = activeTeamId ?? '<your-team-id>';
+              // 方式一：HTTP 远程接入（无需下载、无需本地 node）— nginx /mcp-http/ 转发到容器内 MCP HTTP 服务
+              const httpConfig = JSON.stringify(
+                {
+                  mcpServers: {
+                    'tdai-knowledge': {
+                      type: 'http',
+                      url: `${base}/mcp-http/`,
+                      headers: {
+                        'x-tdai-service-id': iid,
+                        'x-tdai-team-id': teamId,
+                        'x-tdai-user-key': '<your-user-key>',
+                        'x-tdai-agent-id': '<your-agent-id>',
+                      },
+                    },
+                  },
+                },
+                null,
+                2,
+              );
+              // 方式二：curl 下载单文件 + node 本地运行（备选，兼容不支持 HTTP MCP 的客户端）
+              // MCP 单文件下载命令（服务端由 nginx 托管）
+              const downloadUrl = `${base}/mcp/server.mjs`;
+              const downloadCmd = `curl -o server.mjs ${downloadUrl}`;
+              // MCP 配置：本地 node 运行下载的 server.mjs，环境变量注入连接信息
               const mcpConfig = JSON.stringify(
                 {
                   mcpServers: {
                     'tdai-knowledge': {
-                      command: 'npx',
-                      args: ['-y', '@tdai/memory-hub-mcp'],
+                      command: 'node',
+                      args: ['<download-dir>/server.mjs'],
                       env: {
                         KNOWLEDGE_API_URL: base,
-                        TDAI_TEAM_ID: iid,
+                        TDAI_SERVICE_ID: iid,
+                        TDAI_TEAM_ID: teamId,
                         TDAI_USER_KEY: '<your-user-key>',
                         TDAI_AGENT_ID: '<your-agent-id>',
                       },
@@ -330,7 +369,8 @@ export default function ApiKeyPanel() {
               );
               const envLines = [
                 `KNOWLEDGE_API_URL=${base}`,
-                `TDAI_TEAM_ID=${iid}`,
+                `TDAI_SERVICE_ID=${iid}`,
+                `TDAI_TEAM_ID=${teamId}`,
                 `TDAI_USER_KEY=<your-user-key>`,
                 `TDAI_AGENT_ID=<your-agent-id> (可选)`,
               ];
@@ -341,7 +381,67 @@ export default function ApiKeyPanel() {
                     {t('apiKey.mcp.desc')}
                   </Text>
 
-                  {/* Claude Code / Cursor 等客户端配置 */}
+                  {/* 方式一：HTTP 远程接入（无需下载） */}
+                  <div>
+                    <Text theme="label" parent="div" style={{ marginBottom: 4, fontSize: 11 }}>
+                      {t('apiKey.mcp.httpLabel')}
+                    </Text>
+                    <div style={{ position: 'relative' }}>
+                      <pre
+                        style={{
+                          margin: 0,
+                          padding: '8px 12px',
+                          background: 'var(--tea-color-bg-secondary-default)',
+                          border: '1px solid var(--tea-color-border-primary-default)',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontFamily: 'var(--font-mono)',
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                          maxHeight: 200,
+                          overflow: 'auto',
+                        }}
+                      >
+                        {httpConfig}
+                      </pre>
+                      <div style={{ position: 'absolute', top: 6, right: 6 }}>
+                        <Copy text={httpConfig}>
+                          <Button>{t('apiKey.mcp.copyConfig')}</Button>
+                        </Copy>
+                      </div>
+                    </div>
+                    <Text theme="weak" parent="div" style={{ fontSize: 11, marginTop: 4 }}>
+                      {t('apiKey.mcp.httpHint')}
+                    </Text>
+                  </div>
+
+                  {/* 方式二（备选）：curl 下载 + node 本地运行 */}
+                  <div>
+                    <Text theme="label" parent="div" style={{ marginBottom: 4, fontSize: 11 }}>
+                      {t('apiKey.mcp.downloadLabel')}
+                    </Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <code
+                        style={{
+                          flex: 1,
+                          wordBreak: 'break-all',
+                          fontSize: 11,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {downloadCmd}
+                      </code>
+                      <Copy text={downloadCmd}>
+                        <Button>{t('apiKey.mcp.copy')}</Button>
+                      </Copy>
+                    </div>
+                    <Text theme="weak" parent="div" style={{ fontSize: 11, marginTop: 4 }}>
+                      {t('apiKey.mcp.downloadHint')}
+                    </Text>
+                  </div>
+
+                  {/* 第二步：Claude Code / Cursor 等客户端配置 */}
                   <div>
                     <Text theme="label" parent="div" style={{ marginBottom: 4, fontSize: 11 }}>
                       {t('apiKey.mcp.configLabel')}

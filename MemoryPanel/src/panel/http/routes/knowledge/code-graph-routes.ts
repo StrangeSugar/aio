@@ -56,9 +56,11 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if ('error' in gate) return gate.error;
     const branch = str(body, 'branch') ?? undefined;
     const repoName = str(body, 'repo_name') ?? undefined;
+    const username = str(body, 'username') ?? undefined;
+    const password = str(body, 'password') ?? undefined;
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
     try {
-      const detail = await kc.codeGraphCreate(teamId, repoUrl, branch, gate.userId, repoName);
+      const detail = await kc.codeGraphCreate(teamId, repoUrl, branch, gate.userId, repoName, username, password);
       // 注意：不再通过 MemoryProxy 登记 meta_asset，KS 侧直接管理
       return respondEnvelope(c, okEnvelope(c, detail));
     } catch (err) {

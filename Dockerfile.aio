@@ -1,0 +1,449 @@
+# syntax=docker/dockerfile:1
+# ──────────────────────────────────────────────────────────────────────
+# Agent Memory — All-in-One 单体生产镜像
+# ──────────────────────────────────────────────────────────────────────
+# 包含：MemoryCore + MemoryProxy + KnowledgeService + Panel + Web + MCP
+#
+# 构建：
+#   docker build -t agentmemory/aio:latest -f Dockerfile.aio .
+#
+# 运行：
+#   docker run -d \
+#     --name tdai-aio \
+#     -p 80:80 \
+#     -p 8420:8420 \
+#     -p 8424:8424 \
+#     -p 8125:8125 \
+#     -p 8096:8096 \
+#     -e LLM_API_KEY=sk-xxx \
+#     -e LLM_BASE_URL=https://api.openai.com/v1 \
+#     -v tdai-aio-data:/data \
+#     agentmemory/aio:latest
+# ──────────────────────────────────────────────────────────────────────
+
+# ═══ Stage 1: MemoryCore 构建 ═══
+FROM node:22-slim AS core-builder
+
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_disturl=https://npmmirror.com/mirrors/node
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g npm@11 --no-audit --no-fund
+
+WORKDIR /build-core
+COPY MemoryCore/package.json ./
+RUN node -e " \
+        const fs=require('fs'); \
+        const p=JSON.parse(fs.readFileSync('package.json','utf8')); \
+        delete p.peerDependencies; \
+        delete p.peerDependenciesMeta; \
+        p.overrides=Object.assign({},p.overrides,{ \
+            '@jimp/config-typescript':'npm:dotenv@latest' \
+        }); \
+        fs.writeFileSync('package.json',JSON.stringify(p,null,2)); \
+    "
+RUN --mount=type=cache,id=npm-cache-core,target=/root/.npm \
+    npm install --omit=dev --omit=optional --ignore-scripts --legacy-peer-deps --no-audit --no-fund
+RUN --mount=type=cache,id=npm-cache-core,target=/root/.npm \
+    npm install --no-save --ignore-scripts --no-audit --no-fund esbuild
+COPY MemoryCore/ ./
+RUN mkdir -p /data/tdai-memory /data/config
+
+# ═══ Stage 2: MemoryProxy 构建 ═══
+FROM node:22-slim AS proxy-builder
+
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_disturl=https://npmmirror.com/mirrors/node
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g npm@11 --no-audit --no-fund
+
+WORKDIR /build-proxy
+COPY MemoryProxy/package.json MemoryProxy/package-lock.json* ./
+RUN --mount=type=cache,id=npm-cache-proxy,target=/root/.npm \
+    npm install --no-audit --no-fund
+COPY MemoryProxy/ ./
+RUN mkdir -p /data/tdai-memory-proxy /data/config
+
+# ═══ Stage 3: Knowledge Service 构建 ═══
+FROM node:22-slim AS knowledge-builder
+
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_disturl=https://npmmirror.com/mirrors/node
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g npm@11 --no-audit --no-fund
+
+WORKDIR /build-knowledge
+COPY MemoryKnowledge/package.json MemoryKnowledge/.npmrc* ./
+RUN --mount=type=cache,id=npm-cache-knowledge,target=/root/.npm \
+    npm install --no-audit --no-fund
+COPY MemoryKnowledge/tsconfig.json MemoryKnowledge/tsdown.config.ts ./
+COPY MemoryKnowledge/src/ ./src/
+COPY MemoryKnowledge/openapi.yaml ./openapi.yaml
+RUN npm run build
+RUN npm prune --omit=dev
+
+# ═══ Stage 4: Panel 后端构建 ═══
+FROM node:22-slim AS panel-builder
+
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_disturl=https://npmmirror.com/mirrors/node
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g npm@11 --no-audit --no-fund
+
+WORKDIR /build-panel
+COPY MemoryPanel/package.json MemoryPanel/.npmrc* ./
+RUN --mount=type=cache,id=npm-cache-panel,target=/root/.npm \
+    npm install --no-audit --no-fund
+COPY MemoryPanel/tsconfig.json ./
+COPY MemoryPanel/src/ ./src/
+COPY MemoryPanel/config/ ./config/
+RUN npm run build
+RUN npm prune --omit=dev
+
+# ═══ Stage 5: Web 前端构建 ═══
+FROM node:22-slim AS web-builder
+
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_disturl=https://npmmirror.com/mirrors/node
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build-web
+COPY MemoryPanel/web/package.json MemoryPanel/web/.npmrc* ./
+RUN --mount=type=cache,id=npm-cache-web,target=/root/.npm \
+    npm install --no-audit --no-fund
+COPY MemoryPanel/web/ ./
+RUN npm run build
+
+# ═══ Stage 6: MCP Server 构建 ═══
+FROM node:22-slim AS mcp-builder
+
+ENV npm_config_registry=https://registry.npmmirror.com \
+    npm_config_disturl=https://npmmirror.com/mirrors/node
+
+WORKDIR /build-mcp
+COPY mcp-server/package.json ./
+RUN --mount=type=cache,id=npm-cache-mcp,target=/root/.npm \
+    npm install --no-audit --no-fund
+COPY mcp-server/dist ./dist
+
+# ═══ 最终阶段：单体运行时镜像 ═══
+FROM node:22-slim AS runtime
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+# 系统依赖：nginx + git + curl + tini
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      nginx git curl ca-certificates tini \
+      python3 make g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/conf.d/default.conf /etc/nginx/sites-enabled/default
+
+# ── nginx 配置 ──
+COPY <<'EOF' /etc/nginx/conf.d/app.conf
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8125;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /v3/ {
+        proxy_pass http://127.0.0.1:8424;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # MCP 单文件下载
+    location /mcp/ {
+        alias /usr/share/nginx/html/mcp/;
+        add_header Content-Type application/javascript;
+        add_header Access-Control-Allow-Origin *;
+    }
+
+    # MCP streamable HTTP（客户端 URL 直连，无需下载）
+    # 用 ^~ 前缀匹配：http://host/mcp-http 与 http://host/mcp-http/ 均命中，
+    # 避免无尾斜杠时落到 SPA 的 location / 返回 301（MCP 客户端不跟随重定向）。
+    location ^~ /mcp-http {
+        proxy_pass http://127.0.0.1:8426;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+EOF
+
+# ── 复制 Web 前端产物 ──
+COPY --from=web-builder /build-web/dist /usr/share/nginx/html
+
+# ── 复制 MemoryCore ──
+COPY --from=core-builder /build-core /opt/memory-core
+COPY --from=core-builder /data /data
+
+# ── 复制 MemoryProxy ──
+COPY --from=proxy-builder /build-proxy /opt/memory-proxy
+
+# ── 复制 Knowledge Service ──
+COPY --from=knowledge-builder /build-knowledge/dist /opt/knowledge/dist
+COPY --from=knowledge-builder /build-knowledge/node_modules /opt/knowledge/node_modules
+COPY --from=knowledge-builder /build-knowledge/openapi.yaml /opt/knowledge/openapi.yaml
+COPY --from=knowledge-builder /build-knowledge/package.json /opt/knowledge/package.json
+COPY MemoryKnowledge/docker/entrypoint.sh /opt/knowledge/entrypoint.sh
+
+# ── 复制 Panel 后端 ──
+COPY --from=panel-builder /build-panel/dist /opt/panel/dist
+COPY --from=panel-builder /build-panel/node_modules /opt/panel/node_modules
+COPY --from=panel-builder /build-panel/package.json /opt/panel/package.json
+
+# ── 复制 MCP Server ──
+COPY --from=mcp-builder /build-mcp /opt/mcp-server
+
+# ── MCP 单文件通过 nginx 提供下载 ──
+COPY mcp-server/dist/mcp-server.standalone.mjs /usr/share/nginx/html/mcp/server.mjs
+
+# ── 创建统一启动脚本 ──
+COPY <<'EOF' /opt/start.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── 目录准备 ──
+mkdir -p /data/tdai-memory /data/config /data/knowledge /data/tdai-memory-proxy /app/logs
+
+# ── 1. 启动 MemoryCore ──
+echo "[aio] Starting MemoryCore on :8420..."
+cd /opt/memory-core
+TDAI_GATEWAY_CONFIG=/data/config/tdai-gateway.yaml \
+TDAI_DATA_DIR=/data/tdai-memory \
+NODE_ENV=production \
+  node --import tsx src/gateway/server.ts \
+  >> /app/logs/memory-core.log 2>&1 &
+echo $! > /tmp/pid-core
+
+# ── 2. 启动 MemoryProxy ──
+echo "[aio] Starting MemoryProxy on :8096..."
+cd /opt/memory-proxy
+PROXY_DB_PATH=/data/tdai-memory-proxy/proxy.db \
+NODE_ENV=production \
+  node --import tsx/esm src/index.ts --config /data/config.yaml \
+  >> /app/logs/memory-proxy.log 2>&1 &
+echo $! > /tmp/pid-proxy
+
+# ── 3. 启动 Knowledge Service ──
+echo "[aio] Starting Knowledge Service on :8424..."
+cd /opt/knowledge
+KNOWLEDGE_PORT=8424 \
+PORT=8424 \
+KNOWLEDGE_DATA_DIR=/data/knowledge \
+KNOWLEDGE_DATA_DIR=/data/knowledge \
+KNOWLEDGE_DB_PATH=/data/knowledge/knowledge.db \
+NODE_ENV=production \
+GIT_SSL_NO_VERIFY=1 \
+LLM_MODE=${LLM_MODE:-custom} \
+LLM_PROTOCOL=${LLM_PROTOCOL:-openai} \
+LLM_PROVIDER=${LLM_PROVIDER:-custom} \
+LLM_API_KEY=${LLM_API_KEY:-} \
+LLM_BASE_URL=${LLM_BASE_URL:-} \
+LLM_MODEL=${LLM_MODEL:-gpt-4o-mini} \
+LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-32768} \
+LLM_TIMEOUT_MS=${LLM_TIMEOUT_MS:-1200000} \
+  node dist/server.mjs \
+  >> /app/logs/knowledge.log 2>&1 &
+echo $! > /tmp/pid-knowledge
+
+# ── 4. 启动 Panel 后端 ──
+echo "[aio] Starting Panel Backend on :8125..."
+cd /opt/panel
+PORT=8125 \
+HOST=0.0.0.0 \
+NODE_ENV=production \
+METADATA_INSTANCES_CONFIG=./config/metadata-instances.json \
+KNOWLEDGE_SERVICE_URL=http://127.0.0.1:8424 \
+META_PROXY_URL=http://127.0.0.1:8096 \
+METADATA_REMOTE_TIMEOUT_MS=15000 \
+LOG_LEVEL=info \
+  node dist/index.js \
+  >> /app/logs/panel.log 2>&1 &
+echo $! > /tmp/pid-panel
+
+# ── 4.5 启动 MCP HTTP Server（streamable HTTP，供客户端 URL 直连，无需下载）──
+echo "[aio] Starting MCP HTTP Server on :8426..."
+cd /opt/knowledge
+MCP_HTTP_PORT=8426 \
+KNOWLEDGE_API_URL=http://127.0.0.1:8424 \
+NODE_ENV=production \
+  node dist/mcp/http-server.mjs \
+  >> /app/logs/mcp-http.log 2>&1 &
+echo $! > /tmp/pid-mcp-http
+
+# ── 5. 启动 nginx ──
+echo "[aio] Starting nginx on :80..."
+nginx -g 'daemon off;' >> /app/logs/nginx.log 2>&1 &
+echo $! > /tmp/pid-nginx
+
+# ── 等待所有服务就绪 ──
+echo "[aio] Waiting for services to start..."
+sleep 5
+
+# ── 健康检查 ──
+check_health() {
+  local name=$1 url=$2
+  for i in $(seq 1 30); do
+    if curl -fsS "$url" > /dev/null 2>&1; then
+      echo "[aio] ✓ $name is healthy"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "[aio] ✗ $name failed to start"
+  return 1
+}
+
+check_health "MemoryCore" "http://127.0.0.1:8420/health" || true
+check_health "MemoryProxy" "http://127.0.0.1:8096/health" || true
+check_health "Knowledge" "http://127.0.0.1:8424/health" || true
+check_health "Panel" "http://127.0.0.1:8125/health" || true
+check_health "MCP-HTTP" "http://127.0.0.1:8426" || true
+check_health "nginx" "http://127.0.0.1:80" || true
+
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo "  Agent Memory AIO 启动完成"
+echo "  Web:        http://localhost:80"
+echo "  Panel API:  http://localhost:8125"
+echo "  Knowledge:  http://localhost:8424"
+echo "  Core:       http://localhost:8420"
+echo "  Proxy:      http://localhost:8096"
+echo "  MCP HTTP:   http://localhost/mcp-http"
+echo "  MCP 下载:    http://localhost/mcp/server.mjs"
+echo "═══════════════════════════════════════════════════"
+echo ""
+
+# ── 等待任意子进程退出（保持容器运行） ──
+wait -n
+
+# ── 如果有进程退出，记录并退出 ──
+echo "[aio] A service exited, shutting down..."
+kill $(cat /tmp/pid-core 2>/dev/null) 2>/dev/null || true
+kill $(cat /tmp/pid-proxy 2>/dev/null) 2>/dev/null || true
+kill $(cat /tmp/pid-knowledge 2>/dev/null) 2>/dev/null || true
+kill $(cat /tmp/pid-panel 2>/dev/null) 2>/dev/null || true
+kill $(cat /tmp/pid-mcp-http 2>/dev/null) 2>/dev/null || true
+kill $(cat /tmp/pid-nginx 2>/dev/null) 2>/dev/null || true
+exit 1
+EOF
+
+RUN chmod +x /opt/start.sh
+
+# ── 环境变量 ──
+ENV NODE_ENV=production \
+    LLM_MODE=custom \
+    LLM_PROTOCOL=openai \
+    LLM_PROVIDER=custom \
+    LLM_API_KEY="" \
+    LLM_BASE_URL="" \
+    LLM_MODEL=gpt-4o-mini \
+    LLM_MAX_TOKENS=32768 \
+    LLM_TIMEOUT_MS=1200000 \
+    GIT_SSL_NO_VERIFY=1
+
+# ── 端口 ──
+EXPOSE 80 8096 8125 8420 8424
+
+# ── 数据卷 ──
+VOLUME ["/data"]
+
+# ── 健康检查（检查全部服务） ──
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:80/health && \
+      curl -fsS http://127.0.0.1:8125/health && \
+      curl -fsS http://127.0.0.1:8424/health && \
+      curl -fsS http://127.0.0.1:8420/health && \
+      curl -fsS http://127.0.0.1:8096/health || exit 1
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/start.sh"]

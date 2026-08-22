@@ -1015,10 +1015,16 @@ export const zhCN = {
   'apiKey.mcp.copy': '复制',
   'apiKey.mcp.copyConfig': '复制配置',
   'apiKey.mcp.desc':
-    '通过 MCP (Model Context Protocol) 将 Knowledge Service 的知识查询工具暴露给 LLM agent。' +
-    '在你的客户端（Claude Code / Cursor / VS Code 等）中添加以下配置即可使用。' +
-    'TDAI_TEAM_ID 指定团队隔离，TDAI_AGENT_ID 可选（限制只访问该 agent 挂载的知识）。',
-  'apiKey.mcp.configLabel': '客户端配置（mcpServers）',
+    '通过 MCP (Model Context Protocol) 将 Knowledge Service 的知识查询工具暴露给 LLM agent。两种接入方式：' +
+    '① HTTP 远程接入（推荐，无需下载、无需本地 node，直接在客户端配置 URL）；' +
+    '② curl 下载单文件 + node 本地运行（备选，兼容不支持 HTTP MCP 的客户端）。' +
+    'TDAI_USER_KEY 填本页创建的 User_Key，TDAI_TEAM_ID 为当前团队，TDAI_AGENT_ID 可选（限制只访问该 agent 挂载的知识）。',
+  'apiKey.mcp.httpLabel': '方式一（推荐）：HTTP 远程接入（无需下载）',
+  'apiKey.mcp.httpHint':
+    '客户端通过 URL 直连 MCP 服务，无需下载文件或安装依赖。注意：各客户端 HTTP MCP 配置写法略有差异（Claude Code / Cursor 用 type:http + headers；OpenCode 用 type:remote），请按需调整。',
+  'apiKey.mcp.downloadLabel': '方式二（备选）：curl 下载 + node 本地运行',
+  'apiKey.mcp.downloadHint': '下载后放到任意目录，并把下面配置中的路径替换为实际保存路径。',
+  'apiKey.mcp.configLabel': '方式二配置：客户端配置（mcpServers）',
   'apiKey.mcp.envLabel': '环境变量说明',
   'apiKey.mcp.clientsLabel': '支持的客户端',
   'apiKey.create.caption': '新建 User_Key',

@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+# Panel 后端 — 生产镜像（编译 + node 运行）
+#
+# Build:
+#   docker build -t agentmemory/memory-panel:latest -f MemoryPanel/Dockerfile.prod .
+#
+# Run:
+#   docker run -d -p 8125:8125 agentmemory/memory-panel:latest
+
+# ── Stage 1: build ──
+FROM node:22-slim AS builder
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 安装依赖
+COPY package.json .npmrc* ./
+RUN --mount=type=cache,id=npm-cache-panel,target=/root/.npm \
+    npm install --no-audit --no-fund
+
+# 编译 TypeScript
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npm run build
+
+# ── Stage 2: runtime ──
+FROM node:22-slim AS runtime
+
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      git curl ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 只复制生产依赖和编译产物
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./
+
+# 只安装生产依赖
+RUN --mount=type=cache,id=npm-cache-panel-prod,target=/root/.npm \
+    npm install --omit=dev --no-audit --no-fund
+
+ENV NODE_ENV=production \
+    PORT=8125 \
+    HOST=0.0.0.0
+
+EXPOSE 8125
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8125/health || exit 1
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "dist/index.js"]

@@ -9,7 +9,7 @@
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../middleware/validate-panel-headers.js';
 import { respondControlError, respondEnvelope } from '../envelope.js';
-import type { PanelDeps } from '../../../panel-deps.js';
+import type { PanelDeps } from '../../panel-deps.js';
 import {
   buildCtx,
   readJson,
@@ -50,7 +50,7 @@ async function fetchKsAssets(
   try {
     if (assetType === ASSET_TYPE_WIKI) {
       const res = await kc.wikiList(teamId);
-      return res.items.map((w) => ({
+      return res.items.map((w: { wiki_id: string; name: string; status: string; owner_user_id: string | null }) => ({
         id: w.wiki_id,
         name: w.name,
         status: w.status,
@@ -58,7 +58,7 @@ async function fetchKsAssets(
       }));
     }
     const res = await kc.codeGraphList(teamId);
-    return res.items.map((cg) => ({
+    return res.items.map((cg: { code_graph_id: string; repo_name?: string; repo_url?: string; status: string; owner_user_id: string | null }) => ({
       id: cg.code_graph_id,
       name: cg.repo_name || cg.repo_url || cg.code_graph_id,
       status: cg.status,

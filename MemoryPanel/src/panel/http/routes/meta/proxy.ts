@@ -7,7 +7,9 @@ import {
 import type { PanelDeps } from '../../../panel-deps.js';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
 import { respondControlError, respondEnvelope } from '../../envelope.js';
+import { DomainError } from '../../../domain/errors.js';
 import type { MetaCallContext } from '../../../kernel/types.js';
+import type { MetaEnvelope } from '../../../kernel/envelope.js';
 
 /**
  * 从请求路径中解析 meta action。
@@ -52,7 +54,16 @@ export function registerMetaProxyRoutes(api: Hono, deps: PanelDeps): void {
       reqId: c.get('reqId'),
     };
 
-    const envelope = await deps.metaKernel.invoke(action, body, ctx);
+    let envelope: MetaEnvelope<unknown>;
+    try {
+      envelope = await deps.metaKernel.invoke(action, body, ctx);
+    } catch (err) {
+      // 下游错误（如无效 user_key → 401）须原样透传，否则全局 onError 会吞成 500。
+      if (err instanceof DomainError) {
+        return respondControlError(c, err.httpStatus, err.message || err.code);
+      }
+      throw err;
+    }
     return respondEnvelope(c, envelope);
   });
 }

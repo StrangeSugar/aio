@@ -1048,10 +1048,18 @@ export const enUS = {
   'apiKey.mcp.copy': 'Copy',
   'apiKey.mcp.copyConfig': 'Copy Config',
   'apiKey.mcp.desc':
-    'Expose Knowledge Service knowledge query tools to LLM agents via MCP (Model Context Protocol). ' +
-    'Add the following config to your client (Claude Code / Cursor / VS Code, etc.) to get started. ' +
-    'TDAI_TEAM_ID scopes the team; TDAI_AGENT_ID is optional (restricts to knowledge bound to that agent).',
-  'apiKey.mcp.configLabel': 'Client Config (mcpServers)',
+    'Expose Knowledge Service knowledge query tools to LLM agents via MCP (Model Context Protocol). Two ways: ' +
+    '1) HTTP remote access (recommended — no download, no local node, just a URL in your client); ' +
+    '2) curl the single-file server and run it with node (fallback for clients without HTTP MCP support). ' +
+    'TDAI_USER_KEY is a User_Key created on this page; TDAI_TEAM_ID is the current team; ' +
+    'TDAI_AGENT_ID is optional (restricts to knowledge bound to that agent).',
+  'apiKey.mcp.httpLabel': 'Option 1 (recommended): HTTP remote access (no download)',
+  'apiKey.mcp.httpHint':
+    'The client connects to the MCP service by URL — no file download or dependency install needed. ' +
+    'Note: client config syntax varies (Claude Code / Cursor use type:http + headers; OpenCode uses type:remote); adjust as needed.',
+  'apiKey.mcp.downloadLabel': 'Option 2 (fallback): curl download + node run',
+  'apiKey.mcp.downloadHint': 'Save it anywhere and replace the path in the config below with its actual location.',
+  'apiKey.mcp.configLabel': 'Option 2 config: Client Config (mcpServers)',
   'apiKey.mcp.envLabel': 'Environment Variables',
   'apiKey.mcp.clientsLabel': 'Supported Clients',
   'apiKey.create.caption': 'New User_Key',
