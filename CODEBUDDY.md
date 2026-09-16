@@ -17,6 +17,20 @@ TencentDB Agent Memory is a monorepo of services that turn agent work into reusa
 
 All Node code is ESM TypeScript on Node >= 22.16. Each module has its own `package.json`, lockfile (`npm` and/or `pnpm`) and `pnpm-workspace.yaml`; there is no root package.json — install inside the module you touch.
 
+### Fork state (read this before trusting module READMEs)
+
+This checkout is **not** plain upstream. Branch `local_mcp` sits on top of upstream `v2.0.1-beta.2` with two local-only commits that no remote branch contains:
+
+- `062e206 refactor: 移除 chat_memory 和 skill 相关代码，精简资产类型` — Panel's Skill and Chat Memory surface is deleted (HTTP routes, `api/skill-actions.ts`, `domain/chat-memory-governance.ts`, `kernel/adapters/fetch-skill-kernel-adapter.ts`, `fetch-kernel-http-adapter.ts`, knowledge `callback-routes.ts`, frontend calls). Panel now manages three asset groups only: **Wiki, CodeGraph, and agent-fixed bindings**. KS gained `POST /v3/assets/list` (`src/routes/assets.ts`) and `/v3/agent-fixed` (`src/routes/agent-fixed.ts`); Panel gained `knowledge/agent-fixed-routes.ts` and `knowledge/unbind-routes.ts`.
+- `711f886 feat: 新增MCP HTTP服务与多端部署支持，优化API密钥MCP配置界面` — adds streamable-HTTP MCP (`MemoryKnowledge/src/mcp/http-server.ts`, port 8426), the AIO single container (`Dockerfile.aio`, `run-aio.sh`), `deploy/docker-compose.prod.yml`, `deploy/.env.example`, `deploy/mcp-server/`, `MemoryPanel/Dockerfile.prod` and `MemoryPanel/web/Dockerfile.prod`, plus the ApiKeyPanel MCP onboarding UI.
+
+Practical consequences:
+
+- `MemoryCore/`, `MemoryProxy/` and `sdk/` are **untouched** by these commits — upstream docs describe them accurately.
+- `MemoryPanel/README.md`, `MemoryPanel/web/README.md` and the root `README.md` are **stale**: they still advertise `/api/v1/skill/*`, `/api/v1/chat-memory/*`, `/api/v1/agent/*` and `pnpm test:panel:e2e`.
+- `PROJECT-STATUS.md` is the authoritative record of the local AIO deployment (container `tdai-aio`, ports 80/8096/8125/8420/8424, volume `tdai-aio-data`, the `x-tdai-*` header contract, and how the MCP server is distributed).
+- Untracked local artifacts, safe to ignore: `.codegraph/`, `.cursor/`, `.env.aio`, `.pnpm-store/`, `dsh-mnemon-*.tgz`.
+
 ## Commands
 
 ### Whole stack (Docker)
@@ -119,13 +133,13 @@ A coding agent points its base URL at MemoryProxy (`:8096`). Proxy forwards verb
 - `module.ts` wires the whole service: `SqliteKnowledgeStore` (drizzle + better-sqlite3, `src/db/schema.ts`, idempotent raw-SQL migrations in `db/client.ts`), one shared serial `BuildQueue` for both engines, a code-graph instance pool, `AutoSyncScheduler`, and restart recovery.
 - `engines/wiki/` runs the ingest pipeline (chunk → LLM extract/commit → frontmatter/merge → index build) and writes a per-wiki `index.db` with FTS5 tables (`wiki_fts`, `page_meta`, `graph_edge`, `source`); `graph-search.ts` answers link-graph queries.
 - `engines/code/` wraps the `@colbymchenry/codegraph` library in `bridge.ts` (`init/indexAll/sync` plus tool execution) and exposes `indexProject` / `syncIndex` / `executeTool` from `index.ts`; repositories are cloned by `source-fetcher/`.
-- Everything is served under `/v3` (Swagger `/docs` reads `openapi.yaml`). The agent-facing surface is two endpoints — `POST /v3/tools/list` and `POST /v3/tools/call`, whitelisted read-only wiki/code tools — with per-resource REST routes in `routes/wiki.ts` and `routes/code-graph.ts`. Build completion is reported back to Panel by `callback.ts` (`TMC_CALLBACK_URL`).
+- Everything is served under `/v3` (Swagger `/docs` reads `openapi.yaml`). The agent-facing surface is two endpoints — `POST /v3/tools/list` and `POST /v3/tools/call`, whitelisted read-only wiki/code tools — with per-resource REST routes in `routes/wiki.ts` and `routes/code-graph.ts`, plus `routes/assets.ts` (`POST /v3/assets/list`) and `routes/agent-fixed.ts` introduced by the fork. Ingest/sync progress is emitted by `callback.ts` to `TMC_CALLBACK_URL`; Panel's receiving route was deleted in the fork, so nothing in-repo consumes it unless you re-add one.
 - MCP: `src/mcp/tools.ts` declares the tools, `http-client.ts` posts each tool call to `${KNOWLEDGE_API_URL}/v3<endpoint>`; `mcp/server.ts` is stdio (single client, `TDAI_*` env mapped to auth headers), while `mcp/http-server.ts` is streamable HTTP on 8426 with one Server + transport per `Mcp-Session-Id` and a per-session auth header snapshot (nginx must set `proxy_buffering off`).
 
 ### MemoryPanel (`src/panel/`, `web/`)
 
-- The backend is deliberately stateless. `config/instance-registry.ts` reads `config/metadata-instances.json` (instance id, gateway endpoint, api key); `kernel/` defines ports plus adapters that forward to Core (`fetch-meta-kernel-adapter.ts` → proxy `/v3/meta/*`) and to KS (`http-knowledge-client.ts`). `http/app.ts` registers every public route under `/api/v1` (meta, skill, chat-memory, knowledge, agent-overview, agent); middleware validates the caller while user keys stay header-only and are never logged or persisted server-side.
-- Web console: React 18 + Vite + Zustand + Tailwind + tea-component. Hash router in `web/src/routes/index.tsx`, pages in `web/src/pages/{wiki,code,team,ResourcePage}`, state in `web/src/stores/`, i18n in `web/src/i18n/{zh-CN,en-US}.ts`, API clients in `web/src/lib/` (`base.ts` for `/api/v1/meta/*`, `knowledge-api.ts`, `teamApi.ts`). `VITE_ENTRY=mock` (`npm run mock`) runs the console without a backend.
+- The backend is deliberately stateless. `config/instance-registry.ts` reads `config/metadata-instances.json` (instance id, gateway endpoint, api key); `kernel/` defines ports plus adapters that forward to Core (`fetch-meta-kernel-adapter.ts` → proxy `/v3/meta/*`) and to KS (`http-knowledge-client.ts`). `http/app.ts` registers only four route groups under `/api/v1`: `meta/instances`, the `/meta/*` proxy (actions whitelisted by `api/meta-actions.ts` → `ALLOWED_PANEL_ACTIONS`), `knowledge/*` (wiki, code-graph, `{type}/team-assets`, agent-fixed, allocate, unbind) and `agent-overview/*`. Middleware validates the caller while user keys stay header-only and are never logged or persisted server-side.
+- Web console: React 18 + Vite + Zustand + Tailwind + tea-component. Hash router in `web/src/routes/index.tsx`, pages in `web/src/pages/{wiki,code,team,ResourcePage}`, state in `web/src/stores/`, i18n in `web/src/i18n/{zh-CN,en-US}.ts`, API clients in `web/src/lib/` — `api/{base,teams,users,agents,assets,auth,meta-instances}.ts` for `/api/v1/meta/*`, plus `knowledge-api.ts` and `teamApi.ts`. `VITE_ENTRY=mock` (`npm run mock`) runs the console without a backend.
 
 ### Deployment shapes
 
@@ -139,4 +153,5 @@ A coding agent points its base URL at MemoryProxy (`:8096`). Proxy forwards verb
 - Commits follow Conventional Commits with a module scope (`memory-core`, `panel`, `knowledge`, `proxy`, `sdk-ts`, `sdk-py`, `deploy`, `docs`) and require a DCO sign-off (`git commit -s`); branch off `master` or the latest `develop_*`, PR back to `develop_server_team` or `master`.
 - Never commit `.env`, `config.yaml`, real `config/metadata-instances.json`, generated data or logs. `bash scripts/secret-scan.sh --strict` must pass for panel/knowledge changes, and `scripts/install-git-hooks.sh` wires it into a pre-commit hook.
 - New integrations should use the v3 data plane (`/v3/*` with team/agent/user isolation); `/capture`, `/recall`, `/search/*` and `/v2/*` are compatibility surfaces.
+- A CodeGraph index exists locally (`.codegraph/`, untracked) and `.cursor/rules/codegraph.mdc` is an always-applied rule: answer structural questions (where a symbol is defined, who calls it, what breaks, how X reaches Y) with the `codegraph_*` MCP tools instead of grep/read loops, and keep `search_content` / `read_file` for literal text. The watcher lags ~500 ms behind writes.
 - `MemoryCore/index.ts` is both the OpenClaw plugin entry and the `TdaiCore` composition root; `dist/index.mjs` is its tsdown output, so build before exercising OpenClaw integration.
