@@ -19,17 +19,33 @@ All Node code is ESM TypeScript on Node >= 22.16. Each module has its own `packa
 
 ### Fork state (read this before trusting module READMEs)
 
-This checkout is **not** plain upstream. Branch `local_mcp` sits on top of upstream `v2.0.1-beta.2` with two local-only commits that no remote branch contains:
+This checkout is **not** plain upstream. Branch `main` (renamed from `local_mcp`) sits on top of upstream `v2.0.1-beta.2` with commits that exist only here; `origin` is this project's own repo, `upstream` is TencentCloud. The two substantive commits (SHAs below are post-rewrite — see "Syncing with upstream"):
 
-- `062e206 refactor: 移除 chat_memory 和 skill 相关代码，精简资产类型` — Panel's Skill and Chat Memory surface is deleted (HTTP routes, `api/skill-actions.ts`, `domain/chat-memory-governance.ts`, `kernel/adapters/fetch-skill-kernel-adapter.ts`, `fetch-kernel-http-adapter.ts`, knowledge `callback-routes.ts`, frontend calls). Panel now manages three asset groups only: **Wiki, CodeGraph, and agent-fixed bindings**. KS gained `POST /v3/assets/list` (`src/routes/assets.ts`) and `/v3/agent-fixed` (`src/routes/agent-fixed.ts`); Panel gained `knowledge/agent-fixed-routes.ts` and `knowledge/unbind-routes.ts`.
-- `711f886 feat: 新增MCP HTTP服务与多端部署支持，优化API密钥MCP配置界面` — adds streamable-HTTP MCP (`MemoryKnowledge/src/mcp/http-server.ts`, port 8426), the AIO single container (`Dockerfile.aio`, `run-aio.sh`), `deploy/docker-compose.prod.yml`, `deploy/.env.example`, `deploy/mcp-server/`, `MemoryPanel/Dockerfile.prod` and `MemoryPanel/web/Dockerfile.prod`, plus the ApiKeyPanel MCP onboarding UI.
+- `e95ab12 refactor: 移除 chat_memory 和 skill 相关代码，精简资产类型` — Panel's Skill and Chat Memory surface is deleted (HTTP routes, `api/skill-actions.ts`, `domain/chat-memory-governance.ts`, `kernel/adapters/fetch-skill-kernel-adapter.ts`, `fetch-kernel-http-adapter.ts`, knowledge `callback-routes.ts`, frontend calls). Panel now manages three asset groups only: **Wiki, CodeGraph, and agent-fixed bindings**. KS gained `POST /v3/assets/list` (`src/routes/assets.ts`) and `/v3/agent-fixed` (`src/routes/agent-fixed.ts`); Panel gained `knowledge/agent-fixed-routes.ts` and `knowledge/unbind-routes.ts`.
+- `0c8e332 feat: 新增MCP HTTP服务与多端部署支持，优化API密钥MCP配置界面` — adds streamable-HTTP MCP (`MemoryKnowledge/src/mcp/http-server.ts`, port 8426), the AIO single container (`Dockerfile.aio`, `run-aio.sh`), `deploy/docker-compose.prod.yml`, `deploy/.env.example`, `deploy/mcp-server/`, `MemoryPanel/Dockerfile.prod` and `MemoryPanel/web/Dockerfile.prod`, plus the ApiKeyPanel MCP onboarding UI.
 
 Practical consequences:
 
 - `MemoryCore/`, `MemoryProxy/` and `sdk/` are **untouched** by these commits — upstream docs describe them accurately.
-- `MemoryPanel/README.md`, `MemoryPanel/web/README.md` and the root `README.md` are **stale**: they still advertise `/api/v1/skill/*`, `/api/v1/chat-memory/*`, `/api/v1/agent/*` and `pnpm test:panel:e2e`.
+- `MemoryPanel/README.md` and `MemoryPanel/web/README.md` are **stale**: they still advertise `/api/v1/skill/*`, `/api/v1/chat-memory/*`, `/api/v1/agent/*` and `pnpm test:panel:e2e`. The root `README.md` has been rewritten for this fork and is accurate.
 - `PROJECT-STATUS.md` is the authoritative record of the local AIO deployment (container `tdai-aio`, ports 80/8096/8125/8420/8424, volume `tdai-aio-data`, the `x-tdai-*` header contract, and how the MCP server is distributed).
 - Untracked local artifacts, safe to ignore: `.codegraph/`, `.cursor/`, `.env.aio`, `.pnpm-store/`, `dsh-mnemon-*.tgz`.
+
+### Syncing with upstream
+
+`origin` is this repo, `upstream` is TencentCloud. Fetch, then take individual changes:
+
+```bash
+git fetch upstream
+git cherry-pick <upstream-sha>     # or: git format-patch -1 <sha> && git am
+```
+
+History was rewritten on 2026-09-16 (`git filter-branch`, all branches and tags) to purge three accidentally committed files from every commit: `deploy/global-images/metadata.db` (a real metadata DB), `opencode.json` (a live `user_key`), and `deploy/mcp-server/README.md` (same key). Consequences you must account for:
+
+- Pre-rewrite SHAs (`062e206`, `711f886`, `5cc6146`, …) are gone and were garbage-collected locally — they cannot be recovered from this clone. The old commits are still available in upstream for shared history.
+- Some commits that upstream also has now carry different SHAs, so the merge base regressed to `4144434` (`v2.0.0-beta.1`). `git merge upstream/feat/server_team` would replay everything upstream changed since 2.0.0 and will conflict on the Panel files this fork refactored — prefer cherry-pick over merge.
+- Tree content is unaffected: the 16 commits shared with upstream were verified byte-identical after the rewrite.
+- This repo is public: never re-commit credentials. `.gitignore` covers `.env.*` and `MemoryPanel/config/metadata-instances.json`, but **not** `opencode.json` or `*.db` — add those patterns before recreating such files locally.
 
 ## Commands
 
