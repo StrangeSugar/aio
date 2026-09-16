@@ -168,7 +168,7 @@ tar xzf mcp-server.tar.gz
 # 在各 IDE 的 MCP 配置中指向 mcp-server/dist/mcp/server.mjs
 ```
 
-详见 `deploy/mcp-server/README.md`。
+客户端的环境变量：`KNOWLEDGE_API_URL`（Knowledge Service 地址）、`TDAI_SERVICE_ID`（实例 ID）、`TDAI_TEAM_ID`（当前团队）、`TDAI_USER_KEY`（用户 User_Key）、`TDAI_AGENT_ID`（可选）。这些值含个人凭证，只写在客户端本地的 MCP 配置里，不要提交进仓库。
 
 ## 常见问题
 

@@ -134,6 +134,6 @@ docker run -d --name tdai-aio \
 ## 四、已知注意事项
 
 1. **8420（MemoryCore）宿主机不可达**：容器内只监听 `127.0.0.1:8420`，发布端口对外无效（原有行为，非本次引入）；容器内健康检查正常。
-2. **git 未跟踪的部署文件**（丢失无法从仓库恢复，注意备份）：`Dockerfile.aio`、`deploy/README.md`、`deploy/docker-compose.prod.yml`、`deploy/mcp-server/`、`mcp-server/`、`opencode.json`。
+2. **部署文件已纳入 git**：`Dockerfile.aio`、`deploy/README.md`、`deploy/docker-compose.prod.yml`、`run-aio.sh`、`mcp-server/`、`deploy/mcp-server/`（现仅剩 `package.json`）均已跟踪；仍未跟踪、需要备份或重新构建的是 `mcp-server/dist/`（含 `/mcp/server.mjs` 分发的 standalone 单文件产物）。
 3. **AIO 数据**全部在卷 `tdai-aio-data` 中（`/data`：knowledge SQLite + wiki + code-graph、MemoryCore metadata.db、proxy db、日志）。
-4. 仓库根 `opencode.json` 是本地开发用 MCP 配置（指向 `D:/self/TencentDB-Agent-Memory/mcp-server`，`KNOWLEDGE_API_URL=http://localhost:8424`）。
+4. **`opencode.json` 已从仓库移除**（`5cc6146`）：仓库根的 OpenCode MCP 配置含真实 user_key，不再入库，需要时用**不被 git 跟踪**的文件或系统环境变量重建（指向 `mcp-server`，`KNOWLEDGE_API_URL=http://localhost:8424`）。
