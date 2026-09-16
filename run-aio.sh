@@ -5,12 +5,28 @@
 #   ./run-aio.sh -d           # 后台启动
 #   ./run-aio.sh --stop       # 停止
 #   ./run-aio.sh --logs       # 查看日志
+#
+# 环境变量：
+#   ENV_FILE           环境变量文件（默认 .env.aio）
+#   PANEL_CONFIG_DIR   含 metadata-instances.json 的目录（默认 <仓库>/MemoryPanel/config）
 
 set -euo pipefail
 
 IMAGE="agentmemory/aio:latest"
 CONTAINER="tdai-aio"
 ENV_FILE="${ENV_FILE:-.env.aio}"
+
+# Panel 实例注册表：镜像内不含该文件，必须由宿主机挂载到 /opt/panel/config，否则 Panel 启动即崩
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PANEL_CONFIG_DIR="${PANEL_CONFIG_DIR:-${SCRIPT_DIR}/MemoryPanel/config}"
+
+# 转成 docker 能识别的主机路径（Git Bash 用 cygpath，WSL 用 wslpath，Linux/原生 docker 原样）
+HOST_PANEL_CONFIG_DIR="${PANEL_CONFIG_DIR}"
+if command -v cygpath >/dev/null 2>&1; then
+  HOST_PANEL_CONFIG_DIR="$(cygpath -m "${PANEL_CONFIG_DIR}")"
+elif command -v wslpath >/dev/null 2>&1; then
+  HOST_PANEL_CONFIG_DIR="$(wslpath -w "${PANEL_CONFIG_DIR}")"
+fi
 
 # 解析参数
 DAEMON=false
@@ -35,6 +51,14 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+# 检查 Panel 实例注册表
+if [ ! -f "${PANEL_CONFIG_DIR}/metadata-instances.json" ]; then
+  echo "ERROR: ${PANEL_CONFIG_DIR}/metadata-instances.json not found."
+  echo "  hint: cp MemoryPanel/config/metadata-instances.example.json MemoryPanel/config/metadata-instances.json"
+  echo "        and fill in gateway_endpoint / api_key, or set PANEL_CONFIG_DIR to the dir containing it."
+  exit 1
+fi
+
 # 读取环境变量
 ENV_ARGS=()
 while IFS='=' read -r key value; do
@@ -52,6 +76,7 @@ PORTS=(
 
 VOLUMES=(
   -v tdai-aio-data:/data
+  -v "${HOST_PANEL_CONFIG_DIR}:/opt/panel/config:ro"
 )
 
 echo "═══════════════════════════════════════════════════"
