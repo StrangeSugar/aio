@@ -85,6 +85,8 @@ export interface CodeGraphStatusPatch {
   service_url?: string | null;
   summary?: string | null;
   version?: number;
+  /** 切换分支：与状态重置同一次 UPDATE 写入，避免出现「分支已换但状态仍 ready」的中间态。 */
+  branch?: string;
 }
 
 export interface CodeGraphMetaPatch {
@@ -220,6 +222,13 @@ export interface IKnowledgeStore {
   createCodeGraph(input: CreateCodeGraphInput): CreateResult<CodeGraphRow>;
   getCodeGraph(serviceId: string, teamId: string, codeGraphId: string): CodeGraphRow | null;
   getCodeGraphById(serviceId: string, codeGraphId: string): CodeGraphRow | null;
+  /** 按 (service_id, team_id, repo_url, branch) 查未删除资产 —— 分支切换的唯一性冲突检测。 */
+  findCodeGraphByRepoBranch(
+    serviceId: string,
+    teamId: string,
+    repoUrl: string,
+    branch: string,
+  ): CodeGraphRow | null;
   listCodeGraphs(serviceId: string, teamId: string, opts?: ListOpts): CodeGraphRow[];
   countCodeGraphs(serviceId: string, teamId: string, opts?: CountOpts): number;
   updateCodeGraphStatus(serviceId: string, codeGraphId: string, patch: CodeGraphStatusPatch): void;

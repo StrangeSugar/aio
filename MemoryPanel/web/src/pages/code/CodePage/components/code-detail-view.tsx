@@ -4,9 +4,10 @@
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, MetricsBoard, SearchBox, StatusTip, Text } from 'tea-component';
-import { ArrowLeftIcon, CodeIcon, RefreshIcon } from 'tea-icons-react';
+import { ArrowLeftIcon, CodeIcon, ForkIcon, RefreshIcon } from 'tea-icons-react';
 import { AssetMarkdown } from '@/pages/ResourcePage/components/AssetMarkdown';
 import { formatRepoName } from './code-constants';
+import { BranchSwitchModal } from './code-branch-modal';
 import { statusLabel } from './code-ui';
 import type { CodeSourcesStore } from './useCodeSources';
 
@@ -16,6 +17,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
     setSubView,
     selected,
     handleSync,
+    openBranchModal,
     searchQuery,
     setSearchQuery,
     searching,
@@ -32,6 +34,8 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
 
   const selRepo = selected ? formatRepoName(selected.repo_name, selected.repo_url) : '';
   const selBranch = selected?.branch ?? '';
+  // 构建中不可切换分支（服务端同样返回 409 busy）
+  const busy = selected?.status === 'pending' || selected?.status === 'processing';
 
   return (
     <div className="_codedetail-root">
@@ -58,6 +62,16 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
               {selected && statusLabel(t, selected.status)}
             </div>
             <div className="_codedetail-header-actions">
+              <Button
+                disabled={busy}
+                tooltip={busy ? t('code.notify.branchBusy') : undefined}
+                onClick={() => openBranchModal(selected.code_graph_id)}
+              >
+                <span className="_codedetail-inline-icon">
+                  <ForkIcon size={14} />
+                  {t('code.action.switchBranch')}
+                </span>
+              </Button>
               <Button type="primary" onClick={() => handleSync(selected.code_graph_id)}>
                 <span className="_codedetail-inline-icon">
                   <RefreshIcon size={14} />
@@ -173,6 +187,9 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
           )}
         </Card.Body>
       </Card>
+
+      {/* 切换分支（详情页入口） */}
+      <BranchSwitchModal store={store} />
     </div>
   );
 }

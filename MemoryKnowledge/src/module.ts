@@ -6,8 +6,8 @@
  * Real wiki worker: LLM ingest via wiki engine.
  */
 
-import { join } from "node:path";
-import { mkdirSync, existsSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { mkdirSync, existsSync, renameSync, rmSync } from "node:fs";
 import pLimit from "p-limit";
 
 import type { Db } from "./db/client.js";
@@ -117,13 +117,17 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
 
   // ── Real code-graph worker: fetch/sync via SourceFetcher + index ──
   const realCodeWorker: CodeGraphWorker = async (ctx) => {
-    const { dir, repoUrl, branch, codeGraphId, username, password, setInternalStatus } = ctx;
-    console.log(`[code-graph] worker start: ${codeGraphId} repo=${repoUrl} username=${username ? '***' : 'none'} password=${password ? '***' : 'none'}`);
+    const { dir, repoUrl, branch, codeGraphId, username, password, forceFreshClone, setInternalStatus } = ctx;
+    log.info(
+      `[code-graph] worker start: ${codeGraphId} repo=${repoUrl} branch=${branch} fresh=${forceFreshClone ? 'yes' : 'no'} username=${username ? '***' : 'none'} password=${password ? '***' : 'none'}`,
+    );
 
     // Resolve protocol-specific fetcher (validates url: https-only + SSRF blocklist).
     const fetcher = fetcherRegistry.resolve(repoUrl);
 
-    const isExistingRepo = existsSync(join(dir, ".git"));
+    // 切换分支必须全量重建：旧 checkout 与旧索引都属于另一个分支，
+    // 既不能增量 fetch（跨分支 reset 不可靠），也不能复用索引。
+    const isExistingRepo = !forceFreshClone && existsSync(join(dir, ".git"));
     let didIncrementalSync = false;
     let version: string | null = null;
 
@@ -149,7 +153,37 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
       }
     }
 
-    if (!didIncrementalSync) {
+    if (forceFreshClone) {
+      // 兜底释放：service 已在入队前 releaseInstance，但查询路径可能在释放之后
+      // 通过 loadIfMissing 又打开了旧目录的索引句柄，覆盖前必须先关闭。
+      const stale = instancePool.get(codeGraphId);
+      if (stale) {
+        try { closeIndex(stale); } catch { /* ignore */ }
+        instancePool.delete(codeGraphId);
+      }
+
+      // 先 clone 到暂存目录，成功后再替换旧 checkout：
+      // 分支名拼错 / 网络失败时，旧分支的代码与索引仍然完整保留。
+      const stagingDir = `${dir}.staging`;
+      try { rmSync(stagingDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      mkdirSync(dirname(stagingDir), { recursive: true });
+      setInternalStatus("cloning");
+      const res = await fetcher.fetch(repoUrl, branch, stagingDir, username, password);
+      version = res.version;
+
+      try {
+        rmSync(dir, { recursive: true, force: true });
+        renameSync(stagingDir, dir);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try { rmSync(stagingDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        throw new Error(`failed to replace workdir after clone (${dir}): ${msg}`);
+      }
+
+      setInternalStatus("indexing");
+      const instance = await indexProject(dir);
+      instancePool.set(codeGraphId, instance);
+    } else if (!didIncrementalSync) {
       mkdirSync(dir, { recursive: true });
       setInternalStatus("cloning");
       const res = await fetcher.fetch(repoUrl, branch, dir, username, password);

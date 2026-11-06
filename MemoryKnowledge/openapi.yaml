@@ -3,7 +3,7 @@ info:
   title: Knowledge Service API
   description: |
     Standalone knowledge service for Code-Graph + LLM-Wiki.
-    Provides 28 endpoints for managing and querying code repositories
+    Provides 29 endpoints for managing and querying code repositories
     and wiki knowledge bases.
 
     ## Multi-tenancy (001)
@@ -427,7 +427,7 @@ paths:
           $ref: '#/components/responses/ErrorResponse'
 
   # ═══════════════════════════════════════════════
-  # Code-Graph (13 endpoints)
+  # Code-Graph (14 endpoints)
   # ═══════════════════════════════════════════════
 
   /code-graph/create:
@@ -532,6 +532,41 @@ paths:
           description: Accepted
         '404':
           description: Code graph not found
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+
+  /code-graph/update-branch:
+    post:
+      tags: [Code-Graph]
+      summary: Switch branch of an existing code graph (re-clone + full re-index)
+      description: |
+        Updates `branch` in place on the same `code_graph_id` (asset id, ownership and
+        audit history are preserved) and asynchronously re-clones the target branch +
+        rebuilds the whole index. The old checkout and index are discarded.
+
+        - Same branch as current → `200`, no rebuild.
+        - `pending`/`processing` → `409` with `message: busy`.
+        - Another asset already tracks the same repo + target branch in this team →
+          `409` with `message: branch_exists` and `data.code_graph_id` of the existing asset.
+        - Successfully queued → `202`.
+      operationId: updateCodeGraphBranch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodeGraphUpdateBranchRequest'
+      responses:
+        '200':
+          description: Branch unchanged (idempotent, no rebuild)
+        '202':
+          description: Branch switched, rebuild queued
+        '400':
+          description: Invalid branch name
+        '404':
+          description: Code graph not found
+        '409':
+          description: Busy (build in progress) or target branch already exists
         default:
           $ref: '#/components/responses/ErrorResponse'
 
@@ -1100,6 +1135,20 @@ components:
       properties:
         code_graph_id:
           type: string
+
+    CodeGraphUpdateBranchRequest:
+      type: object
+      required: [code_graph_id, branch]
+      properties:
+        code_graph_id:
+          type: string
+        branch:
+          type: string
+          maxLength: 200
+          description: Target git branch name (e.g. `main`, `release/1.0`).
+        user_id:
+          type: string
+          description: Requester user id, recorded in the audit log.
 
     CodeGraphDeleteRequest:
       type: object

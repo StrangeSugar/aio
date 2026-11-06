@@ -185,6 +185,8 @@ export interface KnowledgeClientPort {
   codeGraphSync(codeGraphId: string): Promise<CodeGraphSyncResult>;
   codeGraphDelete(codeGraphIds: string[]): Promise<BatchDeleteResult>;
   codeGraphUpdateMeta(codeGraphId: string, patch: { repo_name?: string; summary?: string | null }): Promise<CodeGraphDetail>;
+  /** 切换分支：同一 code_graph_id 改 branch 并重新 clone + 全量建图。 */
+  codeGraphUpdateBranch(codeGraphId: string, branch: string, userId?: string): Promise<CodeGraphDetail>;
   codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult>;
 
   // Agent-Fixed — 查询 Agent 绑定的知识资产

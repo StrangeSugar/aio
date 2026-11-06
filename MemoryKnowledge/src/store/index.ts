@@ -54,6 +54,7 @@ export type {
   CodeGraphServiceOptions,
   CreateCodeGraphParams,
   SyncResult,
+  ChangeBranchResult,
 } from "./code-graph-service.js";
 
 export { WikiService } from "./wiki-service.js";

@@ -397,6 +397,23 @@ export const enUS = {
   'code.action.allocate': 'Allocate',
   'code.action.sync': 'Sync',
   'code.action.delete': 'Delete',
+  'code.action.switchBranch': 'Switch branch',
+  'code.branchSwitch.caption': 'Switch Branch',
+  'code.branchSwitch.repo': 'Repository',
+  'code.branchSwitch.current': 'Current branch',
+  'code.branchSwitch.target': 'Target branch',
+  'code.branchSwitch.placeholder': 'Enter a target branch, e.g. main, release/1.0',
+  'code.branchSwitch.hint':
+    'Switching discards the current checkout and index, re-clones the target branch and rebuilds the whole graph. The repo is unavailable meanwhile.',
+  'code.branchSwitch.invalid':
+    'Invalid branch name: only letters, digits, dot, underscore, hyphen and slash are allowed, no "..", and it cannot start with "-".',
+  'code.branchSwitch.same': 'Same as the current branch, nothing to switch.',
+  'code.branchSwitch.submit': 'Switch',
+  'code.branchSwitch.submitting': 'Switching…',
+  'code.notify.branchChanged': 'Switched to branch {{branch}}, rebuilding the code graph',
+  'code.notify.branchExists':
+    'That branch already exists for this repository. Delete the existing asset before switching.',
+  'code.notify.branchBusy': 'The repository is building. Try switching branch later.',
   'code.table.select': 'Select',
   'code.table.selected': 'Selected',
   'code.register.caption': 'Register Repository',

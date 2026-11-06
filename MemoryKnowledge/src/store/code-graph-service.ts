@@ -3,7 +3,7 @@
  *
  * 把 IKnowledgeStore（元数据/状态）+ BuildQueue（后台串行）+ 可注入的
  * worker（实际 git clone + codegraph 建图）粘合，实现：
- *   - create/sync 立即返回（fire-and-forget），管控轮询 status；
+ *   - create/sync/changeBranch 立即返回（fire-and-forget），管控轮询 status；
  *   - 状态机 pending → processing(cloning/indexing) → ready / failed(+sync_error)；
  *   - memory + team 隔离、幂等（同 memory+team+repo+branch 返回已存在）、硬删 + 四类资源清理。
  *
@@ -41,6 +41,11 @@ export interface CodeGraphBuildContext {
   password?: string;
   /** 该资产的本地工作目录（checkout + 索引落此）。 */
   dir: string;
+  /**
+   * 是否强制丢弃已有 checkout 并全量重建（切换分支时为 true）。
+   * worker 需跳过增量 sync，先清空 dir 再 clone + indexProject。
+   */
+  forceFreshClone?: boolean;
   /** worker 可调用以更新细粒度内部状态（cloning → indexing）。 */
   setInternalStatus: (s: string) => void;
 }
@@ -62,6 +67,25 @@ export type SyncResult =
   | { kind: "ok"; row: CodeGraphRow }
   | { kind: "not_found" }
   | { kind: "busy"; status: "pending" | "processing"; step: string | null };
+
+/**
+ * 切换分支结果（判别联合）：
+ *   - ok         已切分支并入队重建；changed=false 表示目标分支与当前一致（幂等，未重建）；
+ *   - not_found  memory/team/id 不匹配；
+ *   - busy       正在 pending/processing（并发拒绝，对应 HTTP 409）；
+ *   - conflict   同 team 同仓库同分支的资产已存在（唯一索引冲突，对应 HTTP 409）。
+ */
+export type ChangeBranchResult =
+  | { kind: "ok"; row: CodeGraphRow; changed: boolean }
+  | { kind: "not_found" }
+  | { kind: "busy"; status: "pending" | "processing"; step: string | null }
+  | { kind: "conflict"; existingId: string };
+
+/** 唯一约束冲突判定（并发切换分支时 UPDATE 可能撞 idx_kcg_team_repo_branch）。 */
+function isUniqueConstraintError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /UNIQUE constraint failed|SQLITE_CONSTRAINT/i.test(msg);
+}
 
 export interface CodeGraphServiceLogger {
   info?: (msg: string) => void;
@@ -172,6 +196,82 @@ export class CodeGraphService {
     const fresh = this.store.getCodeGraph(serviceId, teamId, codeGraphId);
     if (fresh) this.enqueueBuild(fresh);
     return fresh ? { kind: "ok", row: fresh } : { kind: "not_found" };
+  }
+
+  /**
+   * 切换分支：同一 code_graph_id 上改 branch 并重新全量建图（不删资产）。
+   *
+   * 顺序（关键）：
+   *   1. 行不存在 → not_found；pending/processing → busy（与 sync 一致，避免并发重建）
+   *   2. 目标分支与当前一致 → ok(changed=false)，幂等短路，不重复构建
+   *   3. 同 team 同仓库同分支已存在 → conflict（唯一索引 idx_kcg_team_repo_branch）
+   *   4. releaseInstance 释放旧目录的索引句柄（worker 随后会删目录重建）
+   *   5. 单次 UPDATE：branch + 状态回退 pending + 清空 commit/stats/summary/last_sync_at
+   *   6. 审计 + 以 forceFreshClone 入队
+   */
+  changeBranch(
+    serviceId: string,
+    teamId: string,
+    codeGraphId: string,
+    branch: string,
+    requesterUserId?: string,
+  ): ChangeBranchResult {
+    const row = this.store.getCodeGraph(serviceId, teamId, codeGraphId);
+    if (!row) return { kind: "not_found" };
+    if (row.status === "pending" || row.status === "processing") {
+      return { kind: "busy", status: row.status, step: row.internal_status };
+    }
+    if (row.branch === branch) return { kind: "ok", row, changed: false };
+
+    // 走到这里 row.branch !== branch，同分支查重不可能命中自己。
+    const conflict = this.store.findCodeGraphByRepoBranch(serviceId, teamId, row.repo_url, branch);
+    if (conflict) {
+      return { kind: "conflict", existingId: conflict.code_graph_id };
+    }
+
+    // 先留存旧分支：UPDATE 后行对象可能被实现就地修改（审计要记录真实的前后值）。
+    const previousBranch = row.branch;
+    const nextVersion = row.version + 1;
+    try {
+      this.store.updateCodeGraphStatus(serviceId, codeGraphId, {
+        branch,
+        status: "pending",
+        internal_status: null,
+        sync_error: null,
+        commit_hash: null,
+        stats_json: null,
+        summary: null,
+        last_sync_at: null,
+        version: nextVersion,
+      });
+    } catch (err) {
+      // 并发窗口内的唯一约束兜底：回报冲突而非 500。
+      if (isUniqueConstraintError(err)) {
+        const winner = this.store.findCodeGraphByRepoBranch(serviceId, teamId, row.repo_url, branch);
+        return { kind: "conflict", existingId: winner?.code_graph_id ?? "" };
+      }
+      throw err;
+    }
+
+    // UPDATE 成功后再释放旧索引句柄：冲突/失败时无需无谓关闭（lazy load 可恢复）。
+    // 旧目录即将被 worker 删除，句柄先关掉避免指向被 unlink 的索引库。
+    try {
+      this.releaseInstance?.(codeGraphId);
+    } catch (err) {
+      this.logger?.warn?.(`[code-graph] release instance before branch switch failed ${codeGraphId}: ${String(err)}`);
+    }
+
+    this.audit(
+      { ...row, version: nextVersion },
+      "ingest",
+      `switch branch ${previousBranch} → ${branch}`,
+      requesterUserId,
+    );
+
+    const fresh = this.store.getCodeGraph(serviceId, teamId, codeGraphId);
+    if (!fresh) return { kind: "not_found" };
+    this.enqueueBuild(fresh, { forceFreshClone: true });
+    return { kind: "ok", row: fresh, changed: true };
   }
 
   get(serviceId: string, teamId: string, codeGraphId: string): CodeGraphRow | null {
@@ -285,9 +385,18 @@ export class CodeGraphService {
     }
   }
 
-  private enqueueBuild(row: CodeGraphRow): void {
+  private enqueueBuild(row: CodeGraphRow, opts?: { forceFreshClone?: boolean }): void {
     this.queue.enqueue(row.code_graph_id, () =>
-      this.runBuild(row.service_id, row.code_graph_id, row.team_id, row.repo_url, row.branch, row.username ?? undefined, row.password ?? undefined),
+      this.runBuild(
+        row.service_id,
+        row.code_graph_id,
+        row.team_id,
+        row.repo_url,
+        row.branch,
+        row.username ?? undefined,
+        row.password ?? undefined,
+        opts?.forceFreshClone,
+      ),
     );
   }
 
@@ -299,6 +408,7 @@ export class CodeGraphService {
     branch: string,
     username?: string,
     password?: string,
+    forceFreshClone?: boolean,
   ): Promise<void> {
     // 入口检查点：pending 期间被删 → 直接跳过，不置 processing、不建图。
     if (this.isDeleted(serviceId, codeGraphId)) {
@@ -319,6 +429,7 @@ export class CodeGraphService {
         branch,
         username,
         password,
+        forceFreshClone,
         dir: this.dirFor(serviceId, teamId, codeGraphId),
         setInternalStatus: (s) =>
           this.store.updateCodeGraphStatus(serviceId, codeGraphId, { status: "processing", internal_status: s }),

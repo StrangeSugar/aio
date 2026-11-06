@@ -168,6 +168,29 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
     return row ? this.mapCgRow(row) : null;
   }
 
+  /** 同 team 同仓库同分支的未删除资产（分支切换冲突检测，对齐 idx_kcg_team_repo_branch）。 */
+  findCodeGraphByRepoBranch(
+    serviceId: string,
+    teamId: string,
+    repoUrl: string,
+    branch: string,
+  ): CodeGraphRow | null {
+    const row = this.db
+      .select()
+      .from(knowledgeCodeGraph)
+      .where(
+        and(
+          eq(knowledgeCodeGraph.serviceId, serviceId),
+          eq(knowledgeCodeGraph.teamId, teamId),
+          eq(knowledgeCodeGraph.repoUrl, repoUrl),
+          eq(knowledgeCodeGraph.branch, branch),
+          isNull(knowledgeCodeGraph.deletedAt),
+        ),
+      )
+      .get();
+    return row ? this.mapCgRow(row) : null;
+  }
+
   listCodeGraphs(serviceId: string, teamId: string, opts?: ListOpts): CodeGraphRow[] {
     const conditions: SQL[] = [
       eq(knowledgeCodeGraph.serviceId, serviceId),
@@ -215,6 +238,7 @@ export class SqliteKnowledgeStore implements IKnowledgeStore {
     if (patch.service_url !== undefined) set.serviceUrl = patch.service_url;
     if (patch.summary !== undefined) set.summary = patch.summary;
     if (patch.version !== undefined) set.version = patch.version;
+    if (patch.branch !== undefined) set.branch = patch.branch;
 
     this.db
       .update(knowledgeCodeGraph)

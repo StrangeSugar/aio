@@ -1,7 +1,7 @@
 /**
- * Code-Graph Routes — 13 endpoints (Hono rewrite).
+ * Code-Graph Routes — 14 endpoints (Hono rewrite).
  *
- * Management (5): create / list / get / sync / delete
+ * Management (6): create / list / get / update-branch / sync / delete
  * Query (8): search / explore / callers / callees / impact / node / status / files
  *
  * Query endpoints delegate to engines/code executeTool, return {text, isError}.
@@ -105,6 +105,22 @@ const QUERY_SPECS: Record<string, QuerySpec> = {
   },
 };
 
+/**
+ * Git 分支名合法性（服务端兜底，前端校验只优化体验）：
+ * 仅允许字母/数字/`.`/`_`/`-`/`/`，并排除 `..`、`//`、`@{`、首尾 `/`、
+ * 首字符 `-`、结尾 `.` 或 `.lock` 等 git 明确拒绝的 ref 形态。
+ */
+const GIT_BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+
+function isValidGitBranchName(branch: string): boolean {
+  if (!branch || branch.length > 200) return false;
+  if (!GIT_BRANCH_RE.test(branch)) return false;
+  if (branch.startsWith("-") || branch.startsWith("/") || branch.endsWith("/")) return false;
+  if (branch.endsWith(".") || branch.endsWith(".lock")) return false;
+  if (branch.includes("..") || branch.includes("//") || branch.includes("@{")) return false;
+  return true;
+}
+
 /** Validate query params against spec whitelist + defaults. Returns toolParams or error string. */
 function buildToolParams(
   action: string,
@@ -188,6 +204,8 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
     if (typeof repoUrl !== "string" || !repoUrl) return c.json(wrapError(400, "repo_url is required"), 400);
 
     const branch = typeof body.branch === "string" && body.branch ? body.branch : "main";
+    // 以 "-" 开头的分支名会被 git 当成命令行选项；simple-git 用参数数组也无法规避。
+    if (branch.startsWith("-")) return c.json(wrapError(400, "branch is invalid"), 400);
     const repoName = typeof body.repo_name === "string" ? body.repo_name : undefined;
     const username = typeof body.username === "string" ? body.username : undefined;
     const password = typeof body.password === "string" ? body.password : undefined;
@@ -264,6 +282,37 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
     const updated = cgService.updateMeta(serviceId, cgId, patch);
     if (!updated) return c.json(wrapError(404, "code graph not found"), 404);
     return c.json(wrapOk(toCodeGraphDetail(updated)));
+  });
+
+  // 切换分支：同一 code_graph_id 改 branch + 重新全量 clone/索引（不删资产）。
+  app.post("/update-branch", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = c.req.header("x-tdai-service-id");
+    if (!isValidIdSegment(serviceId)) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const cgId = body.code_graph_id;
+    if (!isValidIdSegment(cgId)) return c.json(wrapError(400, "code_graph_id is required"), 400);
+    const branch = typeof body.branch === "string" ? body.branch.trim() : "";
+    if (!isValidGitBranchName(branch)) {
+      return c.json(wrapError(400, "branch is invalid"), 400);
+    }
+    const requesterUserId = typeof body.user_id === "string" && body.user_id ? body.user_id : undefined;
+
+    const row = cgService.getById(serviceId, cgId);
+    if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+
+    const result = cgService.changeBranch(serviceId, row.team_id, cgId, branch, requesterUserId);
+    if (result.kind === "not_found") return c.json(wrapError(404, "code graph not found"), 404);
+    if (result.kind === "busy") {
+      return c.json({ code: 409, message: "busy", data: { status: result.status, step: result.step } }, 409);
+    }
+    if (result.kind === "conflict") {
+      return c.json(
+        { code: 409, message: "branch_exists", data: { code_graph_id: result.existingId } },
+        409,
+      );
+    }
+    // 未变化 → 200（未重新构建）；已切换并入队 → 202。
+    return c.json(wrapOk(toCodeGraphDetail(result.row)), result.changed ? 202 : 200);
   });
 
   app.post("/sync", async (c) => {

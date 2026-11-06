@@ -186,6 +186,14 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/code-graph/update-meta', { code_graph_id: codeGraphId, ...patch });
   }
 
+  async codeGraphUpdateBranch(codeGraphId: string, branch: string, userId?: string): Promise<CodeGraphDetail> {
+    return this.post('/v3/code-graph/update-branch', {
+      code_graph_id: codeGraphId,
+      branch,
+      ...(userId && { user_id: userId }),
+    });
+  }
+
   async codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult> {
     return this.post(`/v3/code-graph/${tool}`, { code_graph_id: codeGraphId, ...params });
   }

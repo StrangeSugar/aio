@@ -5,7 +5,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, Form, Input, Justify, MetricsBoard, Modal, SearchBox, Segment, Select, StatusTip, Table, Text } from 'tea-component';
-import { ChevronRightIcon, CodeIcon, DeleteIcon, RefreshIcon, UsergroupIcon, ViewListIcon, ViewModuleIcon } from 'tea-icons-react';
+import { ChevronRightIcon, CodeIcon, DeleteIcon, ForkIcon, RefreshIcon, UsergroupIcon, ViewListIcon, ViewModuleIcon } from 'tea-icons-react';
 import { knowledgeApi } from '@/lib/knowledge-api';
 import { tea } from '@/lib/tea-bridge';
 import AllocateAssetDialog from '@/pages/ResourcePage/components/AllocateAssetDialog';
@@ -13,6 +13,7 @@ import { AssetPageHeader } from '@/pages/ResourcePage/components/AssetPageHeader
 import { formatRepoName, formatShortTime, isValidGitHttpUrl, type ScopeTab, type StatusFilter, type ViewMode } from './code-constants';
 import { CodeOwnerLabel, statusLabel } from './code-ui';
 import { useCodeSources } from './useCodeSources';
+import { BranchSwitchModal } from './code-branch-modal';
 import { CodeDetailView } from './code-detail-view';
 import './code-sources-panel.css';
 
@@ -65,6 +66,7 @@ export default function CodeSourcesPanel() {
     handleRegister,
     handleSync,
     handleDelete,
+    openBranchModal,
     openDetail,
     // computed
     stats,
@@ -197,6 +199,8 @@ export default function CodeSourcesPanel() {
               {filteredSources.map((source) => {
                 const isSelected = selectedCodeAsset?.cgId === source.code_graph_id;
                 const repoLabel = formatRepoName(source.repo_name, source.repo_url);
+                // 构建中不可切换分支（服务端同样返回 409 busy）
+                const busy = source.status === 'pending' || source.status === 'processing';
                 return (
                   <div
                     key={source.code_graph_id}
@@ -276,6 +280,14 @@ export default function CodeSourcesPanel() {
                           {t('code.action.allocate')}
                         </Button>
                       )}
+                      <Button
+                        type="icon"
+                        tooltip={busy ? t('code.notify.branchBusy') : t('code.action.switchBranch')}
+                        disabled={busy}
+                        onClick={() => openBranchModal(source.code_graph_id)}
+                      >
+                        <ForkIcon size={14} />
+                      </Button>
                       <Button
                         type="icon"
                         tooltip={t('code.action.sync')}
@@ -385,10 +397,11 @@ export default function CodeSourcesPanel() {
                 {
                   key: 'actions',
                   header: t('code.table.actions'),
-                  width: 280,
+                  width: 340,
                   fixed: 'right',
                   render: (source) => {
                     const repoLabel = formatRepoName(source.repo_name, source.repo_url);
+                    const busy = source.status === 'pending' || source.status === 'processing';
                     return (
                       <div className="_codelist-table-actions">
                         {scopeTab === 'fixed' ? (
@@ -412,6 +425,13 @@ export default function CodeSourcesPanel() {
                             {t('code.action.allocate')}
                           </Button>
                         )}
+                        <Button
+                          type="link"
+                          disabled={busy}
+                          onClick={() => openBranchModal(source.code_graph_id)}
+                        >
+                          {t('code.action.switchBranch')}
+                        </Button>
                         <Button type="link" onClick={() => handleSync(source.code_graph_id)}>
                           {t('code.action.sync')}
                         </Button>
@@ -512,6 +532,9 @@ export default function CodeSourcesPanel() {
             </Modal>
           );
         })()}
+
+      {/* 切换分支（列表入口） */}
+      <BranchSwitchModal store={code} />
 
       {/* Allocate Code-Graph → Agent (固定资产) */}
       {allocateTarget && (

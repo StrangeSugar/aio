@@ -108,6 +108,24 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return runKs(c, () => kc.codeGraphSync(cgId));
   });
 
+  // C4b update-branch — id-only：同一 code_graph_id 改 branch 并异步全量重建。
+  // KS 的 409（busy / branch_exists）经 CoreUpstreamError → runKs 原样透出。
+  api.post('/knowledge/code-graph/update-branch', mw, async (c) => {
+    const ctx = buildCtx(c);
+    const body = await readJson(c);
+    const cgId = str(body, 'code_graph_id');
+    if (!cgId) return respondControlError(c, 400, 'MISSING_CODE_GRAPH_ID');
+    const branch = str(body, 'branch')?.trim();
+    if (!branch) return respondControlError(c, 400, 'MISSING_BRANCH');
+    const gate = await requireKnowledgeRead(deps, c, ctx, cgId, {
+      action: 'write',
+      allowInFlightCodeOwner: true,
+    });
+    if ('error' in gate) return gate.error;
+    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    return runKs(c, () => kc.codeGraphUpdateBranch(cgId, branch, gate.userId));
+  });
+
   // C5 delete — 删 KS 侧资源（不再通过 MemoryProxy 级联删除）
   api.post('/knowledge/code-graph/delete', mw, async (c) => {
     const ctx = buildCtx(c);

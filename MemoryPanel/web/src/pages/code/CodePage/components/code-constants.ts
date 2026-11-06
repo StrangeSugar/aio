@@ -28,6 +28,22 @@ export function isValidGitHttpUrl(raw: string): boolean {
 }
 
 /**
+ * 校验 Git 分支名（与服务端 /v3/code-graph/update-branch 的兜底规则保持一致）：
+ * 仅允许字母/数字/`.`/`_`/`-`/`/`，排除 `..`、`//`、`@{`、首尾 `/`、
+ * 首字符 `-`、结尾 `.` 或 `.lock`。
+ */
+const GIT_BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+export function isValidGitBranchName(raw: string): boolean {
+  const branch = raw.trim();
+  if (!branch || branch.length > 200) return false;
+  if (!GIT_BRANCH_RE.test(branch)) return false;
+  if (branch.startsWith('-') || branch.startsWith('/') || branch.endsWith('/')) return false;
+  if (branch.endsWith('.') || branch.endsWith('.lock')) return false;
+  if (branch.includes('..') || branch.includes('//') || branch.includes('@{')) return false;
+  return true;
+}
+
+/**
  * 从 Git URL 提取可读的仓库名称。
  *
  * repo_name 可能为空（旧数据），此时回退到 URL 会显得很长。

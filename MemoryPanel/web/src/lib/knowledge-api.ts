@@ -459,6 +459,13 @@ export const knowledgeApi = {
     delete: (codeGraphId: string): Promise<void> =>
       panelPost('/code-graph/delete', { code_graph_ids: [codeGraphId] }),
 
+    /**
+     * 切换分支（异步重建）：同一 code_graph_id 改 branch，返回更新后的详情（status=pending）。
+     * 目标分支与当前一致时服务端幂等返回，不触发重建。
+     */
+    updateBranch: (codeGraphId: string, branch: string): Promise<CodeGraphDetail> =>
+      panelPost('/code-graph/update-branch', { code_graph_id: codeGraphId, branch }),
+
     /** 代码搜索（返回 { text, isError } 文本块） */
     search: (codeGraphId: string, query: string, kind?: string, limit?: number): Promise<{ text: string; isError: boolean }> =>
       panelPost('/code-graph/search', { code_graph_id: codeGraphId, query, ...(kind && kind !== 'any' ? { kind } : {}), limit: limit ?? 10 }),

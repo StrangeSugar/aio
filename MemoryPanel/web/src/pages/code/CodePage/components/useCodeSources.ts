@@ -8,7 +8,15 @@ import { knowledgeApi, type CodeGraphDetail } from '@/lib/knowledge-api';
 import { useTeams, useAgents } from '@/services';
 import { readAuth } from '@/components/LoginGate';
 import { tea } from '@/lib/tea-bridge';
-import { isValidGitHttpUrl, formatRepoName, type ScopeTab, type StatusFilter, type SubView, type ViewMode } from './code-constants';
+import {
+  isValidGitHttpUrl,
+  isValidGitBranchName,
+  formatRepoName,
+  type ScopeTab,
+  type StatusFilter,
+  type SubView,
+  type ViewMode,
+} from './code-constants';
 
 export function useCodeSources() {
   const { t } = useTranslation();
@@ -44,6 +52,11 @@ export function useCodeSources() {
     repo: string;
     branch: string;
   } | null>(null);
+  // 切换分支弹窗：branchTargetId 为空表示关闭
+  const [branchTargetId, setBranchTargetId] = useState('');
+  const [formNewBranch, setFormNewBranch] = useState('');
+  const [switchingBranch, setSwitchingBranch] = useState(false);
+
   const { activeTeamId, activeTeam } = useTeams();
   const auth = readAuth();
   const currentUser = auth?.user_id ?? '';
@@ -222,6 +235,10 @@ export function useCodeSources() {
             }
             toRemove.push(detail.code_graph_id);
             void fetchSources();
+          } else if (detail.status === 'failed') {
+            // 构建失败也不该继续轮询：移出 inFlight，并刷新列表暴露 failed / sync_error。
+            toRemove.push(detail.code_graph_id);
+            void fetchSources();
           } else {
             // 只在状态真正变化时才记录更新，避免无意义的 setInFlight 触发重渲染
             if (detail.status !== item.status) updates.push(detail);
@@ -344,6 +361,69 @@ export function useCodeSources() {
     }
   };
 
+  /** 当前正在切换分支的资产（弹窗打开时非空）。 */
+  const branchTarget = useMemo(
+    () => displaySources.find((s) => s.code_graph_id === branchTargetId) ?? null,
+    [displaySources, branchTargetId],
+  );
+
+  const openBranchModal = (cgId: string) => {
+    const source = displaySources.find((s) => s.code_graph_id === cgId);
+    setBranchTargetId(cgId);
+    setFormNewBranch(source?.branch ?? '');
+  };
+
+  const closeBranchModal = () => {
+    if (switchingBranch) return;
+    setBranchTargetId('');
+    setFormNewBranch('');
+  };
+
+  /**
+   * 切换分支：成功返回 pending 详情 → 写入 inFlight 复用既有 8s 轮询，
+   * 同时就地替换 sources，保证列表 / 详情立即显示新分支。
+   */
+  const handleChangeBranch = async () => {
+    if (!branchTarget) return;
+    const target = formNewBranch.trim();
+    if (!isValidGitBranchName(target)) {
+      tea.notify.error(t('code.branchSwitch.invalid'));
+      return;
+    }
+    // 与当前分支相同：幂等短路，不发请求
+    if (target === branchTarget.branch) {
+      setBranchTargetId('');
+      setFormNewBranch('');
+      return;
+    }
+    setSwitchingBranch(true);
+    try {
+      const detail = await knowledgeApi.code.updateBranch(branchTarget.code_graph_id, target);
+      setSources((prev) =>
+        prev.map((s) => (s.code_graph_id === detail.code_graph_id ? detail : s)),
+      );
+      setInFlight((prev) => [
+        ...prev.filter((x) => x.code_graph_id !== detail.code_graph_id),
+        detail,
+      ]);
+      setBranchTargetId('');
+      setFormNewBranch('');
+      tea.notify.info(t('code.notify.branchChanged', { branch: detail.branch }));
+      // 不立即 fetchSources：它先清空 sources 再拉取，会让详情页 selected 短暂为空。
+      // 就地替换 + inFlight 轮询（ready 后自动 fetchSources）已能保证数据最新。
+    } catch (e: any) {
+      if (e?.code === 409 && /branch_exists/i.test(e?.rawMessage ?? '')) {
+        tea.notify.error(t('code.notify.branchExists'));
+      } else if (e?.code === 409) {
+        tea.notify.error(t('code.notify.branchBusy'));
+      } else {
+        tea.notify.error(e);
+      }
+    } finally {
+      setSwitchingBranch(false);
+    }
+  };
+
   const openDetail = (cgId: string) => {
     setSelectedCgId(cgId);
     setSearchQuery('');
@@ -422,6 +502,15 @@ export function useCodeSources() {
     setFormPassword,
     submitting,
     setSubmitting,
+    // branch switch
+    branchTarget,
+    branchTargetId,
+    formNewBranch,
+    setFormNewBranch,
+    switchingBranch,
+    openBranchModal,
+    closeBranchModal,
+    handleChangeBranch,
     // allocate
     allocateTarget,
     setAllocateTarget,
