@@ -1,0 +1,23 @@
+# Docker 构建上下文裁剪（Dockerfile.aio 在仓库根构建）
+# 依赖由各 builder stage 自行 npm install，本地 node_modules 不需要进入上下文。
+
+**/node_modules
+**/.pnpm-store
+**/.vite
+**/coverage
+
+# 版本库 / 本地运行态
+.git
+**/.git
+**/.codegraph
+**/data
+**/*.log
+
+# 敏感配置：镜像不内置，运行时由 -v 挂载
+**/.env
+**/.env.*
+!**/.env.example
+MemoryPanel/config/metadata-instances.json
+
+# 其他无关产物
+**/*.tgz

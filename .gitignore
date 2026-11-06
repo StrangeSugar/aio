@@ -3,6 +3,9 @@ node_modules/
 
 # Runtime workspace
 workspace/
+# codegraph daemon 运行时产物（仅保留其自带的 .gitignore）
+.codegraph/*
+!.codegraph/.gitignore
 
 # Environment variables
 .env

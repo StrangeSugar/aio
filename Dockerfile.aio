@@ -109,8 +109,10 @@ RUN npm install -g npm@11 --no-audit --no-fund
 
 WORKDIR /build-knowledge
 COPY MemoryKnowledge/package.json MemoryKnowledge/.npmrc* ./
+# --legacy-peer-deps：上游 OTel 依赖漂移（@opentelemetry/exporter-trace-otlp-http@0.301
+# 的 peer 要求 api@^1.10，而根项目仍锁 ^1.9.1），不加会导致 ERESOLVE 构建失败。
 RUN --mount=type=cache,id=npm-cache-knowledge,target=/root/.npm \
-    npm install --no-audit --no-fund
+    npm install --legacy-peer-deps --no-audit --no-fund
 COPY MemoryKnowledge/tsconfig.json MemoryKnowledge/tsdown.config.ts ./
 COPY MemoryKnowledge/src/ ./src/
 COPY MemoryKnowledge/openapi.yaml ./openapi.yaml
